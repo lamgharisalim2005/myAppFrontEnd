@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "681462135328",
+    "project_id": "coiffeur-app-493914",
+    "storage_bucket": "coiffeur-app-493914.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:681462135328:android:ac6c879d56594b65a29a45",
+        "android_client_info": {
+          "package_name": "com.example.myapp_coiffeur"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "681462135328-1len23ibmei0ln5dj6ls38e0m73rvioj.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.myapp_coiffeur",
+            "certificate_hash": "f409ae9e8539be0f4c4efe064ecd1c4a09597000"
+          }
+        },
+        {
+          "client_id": "681462135328-olls77t7uuqtjablr8sfoki1jn5v689g.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCwcli4gpEHn_WMU5JC0wXU7p4GrT6UME0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "681462135328-olls77t7uuqtjablr8sfoki1jn5v689g.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
