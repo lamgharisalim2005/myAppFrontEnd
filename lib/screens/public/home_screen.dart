@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'dart:ui' as ui;
 import '../../models/salon.dart';
 import '../auth/login_screen.dart';
+import '../public/salon_detail_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final String? token;
@@ -81,7 +82,11 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> fetchSalons() async {
     try {
       final response = await http.get(
-        Uri.parse('http://192.168.1.21:8080/api/salons'),
+        Uri.parse('http://192.168.0.128:8080/api/salons'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${widget.token}',
+        },
       );
       final data = json.decode(response.body);
       if (response.statusCode == 200 && data['status'] == 'success') {
@@ -381,33 +386,18 @@ class _HomeScreenState extends State<HomeScreen> {
             right: 16,
             child: Column(
               children: [
-                // Non connecté → 👤+
-                if (widget.token == null) ...[
-                  _buildMapButton(Icons.person_add, () {
-                    Navigator.push(
+                // 🚪 Déconnexion
+                _buildMapButton(Icons.logout, () async {
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.clear();
+                  if (context.mounted) {
+                    Navigator.pushAndRemoveUntil(
                       context,
                       MaterialPageRoute(builder: (_) => const LoginScreen()),
+                          (route) => false,
                     );
-                  }),
-                ] else ...[
-                  // Connecté → 👤 + 🚪
-                  _buildMapButton(Icons.person, () {
-                    // TODO: aller vers profil
-                  }),
-                  _buildMapButton(Icons.logout, () async {
-                    final prefs = await SharedPreferences.getInstance();
-                    await prefs.clear();
-                    if (context.mounted) {
-                      Navigator.pushAndRemoveUntil(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const HomeScreen(token: null, role: null),
-                        ),
-                            (route) => false,
-                      );
-                    }
-                  }),
-                ],
+                  }
+                }),
                 const SizedBox(height: 8),
                 // 📍 Ma position
                 _buildMapButton(Icons.my_location, _goToUserLocation),
@@ -476,7 +466,18 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     ElevatedButton(
                       onPressed: () {
-                        // TODO: aller vers détails salon
+                        // TODO: aller vers détails salon je fais
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => SalonDetailScreen(
+                              salonId: selectedSalon!.id,
+                              salonName: selectedSalon!.name,
+                              token: widget.token,
+                              role: widget.role,
+                            ),
+                          ),
+                        );
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: marron,

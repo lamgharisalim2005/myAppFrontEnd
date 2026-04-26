@@ -44,7 +44,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
       // 3. Vérifier si l'utilisateur existe
       final response = await http.post(
-        Uri.parse('http://192.168.1.21:8080/api/auth/google/check'),
+        Uri.parse('http://192.168.0.128:8080/api/auth/google/check'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({'idToken': idToken}),
       );

@@ -21,7 +21,7 @@ class _RoleScreenState extends State<RoleScreen> {
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.1.21:8080/api/auth/google'),
+        Uri.parse('http://192.168.0.128:8080/api/auth/google'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'idToken': widget.idToken,

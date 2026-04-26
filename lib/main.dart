@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/public/home_screen.dart';
+import 'screens/auth/login_screen.dart';
 
 void main() async {
   // Assure que Flutter est initialisé
@@ -30,7 +31,9 @@ class MyApp extends StatelessWidget {
         useMaterial3: true,
       ),
       // Premier écran toujours = Accueil (carte des salons)
-      home: HomeScreen(token: token, role: role),
+      home: token == null
+          ? const LoginScreen()
+          : HomeScreen(token: token, role: role),
     );
   }
 }
