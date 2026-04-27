@@ -57,7 +57,7 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
       });
 
       final response = await http.get(
-        Uri.parse('http://192.168.0.128:8080/api/salons/${widget.salonId}/detail'),
+        Uri.parse('http://192.168.0.144:8080/api/salons/${widget.salonId}/detail'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer ${widget.token}',
@@ -102,7 +102,7 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.0.128:8080/api/salon-requests'),
+        Uri.parse('http://192.168.0.144:8080/api/salon-requests'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer ${widget.token}',
@@ -178,7 +178,10 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
   }
 
   Widget _buildContent() {
-    return CustomScrollView(
+    return RefreshIndicator(
+        color: marron,
+        onRefresh: _fetchSalonDetail,
+        child: CustomScrollView(
       slivers: [
         // AppBar avec photos
         SliverAppBar(
@@ -493,6 +496,7 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
           ),
         ),
       ],
+    ),
     );
   }
 

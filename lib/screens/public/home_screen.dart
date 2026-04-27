@@ -8,12 +8,21 @@ import 'dart:ui' as ui;
 import '../../models/salon.dart';
 import '../auth/login_screen.dart';
 import '../public/salon_detail_screen.dart';
-
+import 'notifications_screen.dart';
+import 'conversations_screen.dart';
+import 'package:stomp_dart_client/stomp_dart_client.dart';
+int unreadNotifications = 0;
 class HomeScreen extends StatefulWidget {
   final String? token;
   final String? role;
+  final String? userId; // ← Ajoute ça
 
-  const HomeScreen({super.key, this.token, this.role});
+  const HomeScreen({
+    super.key,
+    this.token,
+    this.role,
+    this.userId, // ← Ajoute ça
+  });
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -30,6 +39,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController searchController = TextEditingController();
   bool showSearchResults = false;
   List<Salon> searchResults = [];
+  StompClient? _stompClient;
 
   static const String orsApiKey = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImQyZTc2ZjVjMzFhNzRhZTFiNTllZTkxZmI1MzcwNjVhIiwiaCI6Im11cm11cjY0In0=';
   static const Color marron = Color(0xFF795548);
@@ -38,12 +48,73 @@ class _HomeScreenState extends State<HomeScreen> {
     target: LatLng(34.0209, -5.0078),
     zoom: 15,
   );
+  void _connectWebSocket() {
+    _stompClient = StompClient(
+      config: StompConfig(
+        url: 'ws://192.168.0.128:8080/ws/websocket',
+        onConnect: (frame) {
+          debugPrint('✅ WebSocket connecté !');
+
+          // S'abonner aux nouvelles notifications
+          _stompClient!.subscribe(
+            destination: '/queue/notifications/${widget.userId}',
+            callback: (frame) {
+              if (frame.body != null) {
+                // Nouvelle notification reçue → mettre à jour le badge
+                setState(() {
+                  unreadNotifications++;
+                });
+              }
+            },
+          );
+        },
+        onDisconnect: (_) => debugPrint('❌ WebSocket déconnecté !'),
+        stompConnectHeaders: {
+          'Authorization': 'Bearer ${widget.token}',
+        },
+        webSocketConnectHeaders: {
+          'Authorization': 'Bearer ${widget.token}',
+        },
+      ),
+    );
+    _stompClient!.activate();
+  }
 
   @override
   void initState() {
     super.initState();
     fetchSalons();
     _getUserLocation();
+    _fetchUnreadCount();
+    _connectWebSocket(); // ← Ajoute ça
+  }
+  Future<void> _fetchUnreadCount() async {
+    try {
+      final response = await http.get(
+        Uri.parse('http://192.168.0.144:8080/api/notifications/user'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${widget.token}',
+        },
+      );
+      final data = json.decode(response.body);
+      if (data['status'] == 'success') {
+        setState(() {
+          unreadNotifications = (data['data'] as List)
+              .where((n) => n['readStatus'] == false)
+              .length;
+        });
+      }
+    } catch (e) {
+      debugPrint('Erreur: $e');
+    }
+  }
+
+
+  @override
+  void dispose() {
+    _stompClient?.deactivate();
+    super.dispose();
   }
 
   Future<void> _getUserLocation() async {
@@ -82,7 +153,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> fetchSalons() async {
     try {
       final response = await http.get(
-        Uri.parse('http://192.168.0.128:8080/api/salons'),
+        Uri.parse('http://192.168.0.144:8080/api/salons'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer ${widget.token}',
@@ -426,6 +497,11 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
+          const SizedBox(height: 8),
+          // 🔄 Refresh
+          _buildMapButton(Icons.refresh, () {
+            fetchSalons();
+          }),
 
           // 🏪 Carte salon sélectionné
           if (selectedSalon != null)
@@ -546,20 +622,70 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
 
       // 📱 BARRE DE NAVIGATION
-      bottomNavigationBar: widget.token != null
-          ? BottomNavigationBar(
+      bottomNavigationBar: BottomNavigationBar(
         type: BottomNavigationBarType.fixed,
         selectedItemColor: marron,
-        unselectedItemColor: Colors.grey,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Accueil'),
-          BottomNavigationBarItem(icon: Icon(Icons.calendar_today), label: 'Réservations'),
-          BottomNavigationBarItem(icon: Icon(Icons.message), label: 'Messages'),
-          BottomNavigationBarItem(icon: Icon(Icons.notifications), label: 'Notifications'),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profil'),
+        unselectedItemColor: marron,
+        backgroundColor: Colors.white,
+        currentIndex: 0,
+        onTap: (index) async {
+          if (index == 3) {
+            await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => NotificationsScreen(token: widget.token!),
+              ),
+            );
+            _fetchUnreadCount();
+          }
+          if (index == 2) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ConversationsScreen(
+                  token: widget.token!,
+                  userId: widget.userId ?? '',
+                ),
+              ),
+            );
+          }
+        },
+        items: [
+          const BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Accueil'),
+          const BottomNavigationBarItem(icon: Icon(Icons.calendar_today), label: 'Réservations'),
+          const BottomNavigationBarItem(icon: Icon(Icons.message), label: 'Messages'),
+          BottomNavigationBarItem(
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.notifications),
+                if (unreadNotifications > 0)
+                  Positioned(
+                    right: -4,
+                    top: -4,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: const BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Text(
+                        '$unreadNotifications',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            label: 'Notifications',
+          ),
+          const BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profil'),
         ],
-      )
-          : null,
+      ),
     );
   }
 }

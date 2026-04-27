@@ -61,7 +61,7 @@ class _CoiffeurDetailScreenState extends State<CoiffeurDetailScreen> {
       });
 
       final response = await http.get(
-        Uri.parse('http://192.168.0.128:8080/api/coiffeurs/${widget.coiffeurId}/detail'),
+        Uri.parse('http://192.168.0.144:8080/api/coiffeurs/${widget.coiffeurId}/detail'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer ${widget.token}',
@@ -160,7 +160,10 @@ class _CoiffeurDetailScreenState extends State<CoiffeurDetailScreen> {
   }
 
   Widget _buildContent() {
-    return CustomScrollView(
+    return RefreshIndicator(
+        color: marron,
+        onRefresh: _fetchCoiffeurDetail,
+        child: CustomScrollView(
       slivers: [
         // AppBar avec photos
         SliverAppBar(
@@ -407,6 +410,7 @@ class _CoiffeurDetailScreenState extends State<CoiffeurDetailScreen> {
           ),
         ),
       ],
+    ),
     );
   }
 

@@ -26,17 +26,19 @@ class _ReservationScreenState extends State<ReservationScreen> {
   static const Color marron = Color(0xFF795548);
   static const Color vert = Color(0xFF4CAF50);
   static const Color rouge = Color(0xFFE53935);
-  static const Color gris = Color(0xFFEEEEEE);
 
   List<WorkSchedule> workSchedules = [];
   List<Map<String, DateTime>> occupiedSlots = [];
-  DateTime? selectedDateTime;
+
+  DateTime? selectedDate;
+  int selectedHour = 9;
+  int selectedMinute = 0;
+  String? slotStatus; // 'available', 'occupied', 'outside'
 
   bool isLoading = true;
   bool isSubmitting = false;
   String? errorMessage;
 
-  // Jours de la semaine
   static const Map<String, String> dayNames = {
     'MONDAY': 'Lundi',
     'TUESDAY': 'Mardi',
@@ -70,17 +72,16 @@ class _ReservationScreenState extends State<ReservationScreen> {
         errorMessage = null;
       });
 
-      // Appeler les 2 endpoints en parallèle
       final results = await Future.wait([
         http.get(
-          Uri.parse('http://192.168.0.128:8080/api/workschedules/coiffeur/${widget.coiffeurId}'),
+          Uri.parse('http://192.168.0.144:8080/api/workschedules/coiffeur/${widget.coiffeurId}'),
           headers: {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer ${widget.token}',
           },
         ).timeout(const Duration(seconds: 10)),
         http.get(
-          Uri.parse('http://192.168.0.128:8080/api/reservations/coiffeur/${widget.coiffeurId}/slots'),
+          Uri.parse('http://192.168.0.144:8080/api/reservations/coiffeur/${widget.coiffeurId}/slots'),
           headers: {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer ${widget.token}',
@@ -120,23 +121,72 @@ class _ReservationScreenState extends State<ReservationScreen> {
     }
   }
 
-  // Vérifie si un DateTime est occupé
-  bool _isOccupied(DateTime dateTime) {
-    return occupiedSlots.any((slot) =>
-    dateTime.isAfter(slot['start']!.subtract(const Duration(minutes: 1))) &&
-        dateTime.isBefore(slot['end']!));
-  }
-
-  // Récupère les workschedules pour un jour donné
   List<WorkSchedule> _getSchedulesForDate(DateTime date) {
     final dayName = weekdayToDay[date.weekday] ?? '';
     return workSchedules.where((ws) => ws.dayOfWeek == dayName).toList();
   }
 
-  // Génère les 14 prochains jours
+  // Vérifie le statut du créneau sélectionné
+  void _checkSlotStatus() {
+    if (selectedDate == null) return;
+
+    final selectedDT = DateTime(
+      selectedDate!.year,
+      selectedDate!.month,
+      selectedDate!.day,
+      selectedHour,
+      selectedMinute,
+    );
+
+    final endDT = selectedDT.add(Duration(minutes: totalDuration));
+
+    // Vérifier si dans les horaires de travail
+    final schedules = _getSchedulesForDate(selectedDate!);
+    bool inWorkHours = false;
+
+    for (var schedule in schedules) {
+      final startParts = schedule.startTime.split(':');
+      final endParts = schedule.endTime.split(':');
+
+      final workStart = DateTime(
+        selectedDate!.year,
+        selectedDate!.month,
+        selectedDate!.day,
+        int.parse(startParts[0]),
+        int.parse(startParts[1]),
+      );
+      final workEnd = DateTime(
+        selectedDate!.year,
+        selectedDate!.month,
+        selectedDate!.day,
+        int.parse(endParts[0]),
+        int.parse(endParts[1]),
+      );
+
+      if (!selectedDT.isBefore(workStart) && !endDT.isAfter(workEnd)) {
+        inWorkHours = true;
+        break;
+      }
+    }
+
+    if (!inWorkHours) {
+      setState(() => slotStatus = 'outside');
+      return;
+    }
+
+    // Vérifier si occupé
+    bool isOccupied = occupiedSlots.any((slot) {
+      return selectedDT.isBefore(slot['end']!) &&
+          endDT.isAfter(slot['start']!);
+    });
+
+    setState(() => slotStatus = isOccupied ? 'occupied' : 'available');
+  }
+
   List<DateTime> _getNextDays() {
     final now = DateTime.now();
-    return List.generate(14, (i) => DateTime(now.year, now.month, now.day + i + 1));
+    return List.generate(
+        14, (i) => DateTime(now.year, now.month, now.day + i + 1));
   }
 
   double get totalPrice =>
@@ -146,12 +196,20 @@ class _ReservationScreenState extends State<ReservationScreen> {
       widget.selectedServices.fold(0, (sum, s) => sum + s.duration);
 
   Future<void> _confirmerReservation() async {
-    if (selectedDateTime == null) return;
+    if (selectedDate == null || slotStatus != 'available') return;
     setState(() => isSubmitting = true);
+
+    final selectedDT = DateTime(
+      selectedDate!.year,
+      selectedDate!.month,
+      selectedDate!.day,
+      selectedHour,
+      selectedMinute,
+    );
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.0.128:8080/api/reservations'),
+        Uri.parse('http://192.168.0.144:8080/api/reservations'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer ${widget.token}',
@@ -159,7 +217,7 @@ class _ReservationScreenState extends State<ReservationScreen> {
         body: json.encode({
           'coiffeurId': widget.coiffeurId,
           'serviceIds': widget.selectedServices.map((s) => s.id).toList(),
-          'startTime': selectedDateTime!.toIso8601String(),
+          'startTime': selectedDT.toIso8601String(),
         }),
       ).timeout(const Duration(seconds: 10));
 
@@ -218,7 +276,10 @@ class _ReservationScreenState extends State<ReservationScreen> {
           : errorMessage != null
           ? _buildError()
           : _buildContent(),
-      bottomNavigationBar: selectedDateTime != null ? _buildConfirmButton() : null,
+      bottomNavigationBar:
+      selectedDate != null && slotStatus == 'available'
+          ? _buildConfirmButton()
+          : null,
     );
   }
 
@@ -250,9 +311,8 @@ class _ReservationScreenState extends State<ReservationScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Résumé en haut
+          // Résumé
           _buildSummary(),
-
           const SizedBox(height: 16),
 
           // Planning
@@ -268,14 +328,17 @@ class _ReservationScreenState extends State<ReservationScreen> {
             ),
           ),
           const SizedBox(height: 8),
-
-          // Légende
           _buildLegend(),
-
           const SizedBox(height: 8),
 
-          // Liste des jours
+          // Jours
           ..._getNextDays().map((date) => _buildDayRow(date)),
+
+          // Sélecteur d'heure (si jour sélectionné)
+          if (selectedDate != null) ...[
+            const SizedBox(height: 16),
+            _buildTimePicker(),
+          ],
 
           const SizedBox(height: 32),
         ],
@@ -336,10 +399,8 @@ class _ReservationScreenState extends State<ReservationScreen> {
                 children: [
                   const Icon(Icons.access_time, size: 16, color: Colors.grey),
                   const SizedBox(width: 4),
-                  Text(
-                    '$totalDuration min',
-                    style: const TextStyle(color: Colors.grey),
-                  ),
+                  Text('$totalDuration min',
+                      style: const TextStyle(color: Colors.grey)),
                 ],
               ),
               Text(
@@ -352,23 +413,6 @@ class _ReservationScreenState extends State<ReservationScreen> {
               ),
             ],
           ),
-          if (selectedDateTime != null) ...[
-            const Divider(height: 20),
-            Row(
-              children: [
-                const Icon(Icons.calendar_today, size: 16, color: marron),
-                const SizedBox(width: 8),
-                Text(
-                  '${_formatDate(selectedDateTime!)} • ${_formatTime(selectedDateTime!)}',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: marron,
-                  ),
-                ),
-              ],
-            ),
-          ],
         ],
       ),
     );
@@ -393,8 +437,8 @@ class _ReservationScreenState extends State<ReservationScreen> {
     return Row(
       children: [
         Container(
-          width: 16,
-          height: 16,
+          width: 14,
+          height: 14,
           decoration: BoxDecoration(
             color: color,
             borderRadius: BorderRadius.circular(4),
@@ -410,66 +454,81 @@ class _ReservationScreenState extends State<ReservationScreen> {
     final schedules = _getSchedulesForDate(date);
     final dayName = weekdayToDay[date.weekday] ?? '';
     final dayLabel = dayNames[dayName] ?? '';
-    final dateLabel = '${date.day}/${date.month}';
+    final isSelected = selectedDate?.day == date.day &&
+        selectedDate?.month == date.month &&
+        selectedDate?.year == date.year;
 
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Nom du jour
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                '$dayLabel $dateLabel',
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black87,
-                ),
-              ),
-              if (schedules.isEmpty)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade200,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Text(
-                    'Fermé',
-                    style: TextStyle(fontSize: 11, color: Colors.grey),
-                  ),
-                ),
-            ],
+    return GestureDetector(
+      onTap: schedules.isEmpty
+          ? null
+          : () {
+        setState(() {
+          selectedDate = date;
+          slotStatus = null;
+        });
+        _checkSlotStatus();
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: isSelected ? marron.withOpacity(0.08) : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected ? marron : Colors.transparent,
+            width: 2,
           ),
-
-          if (schedules.isEmpty)
-            const SizedBox(height: 8),
-
-          if (schedules.isEmpty)
-            Container(
-              height: 12,
-              decoration: BoxDecoration(
-                color: Colors.grey.shade200,
-                borderRadius: BorderRadius.circular(6),
-              ),
-            ),
-
-          // Barres horaires
-          if (schedules.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            ...schedules.map((schedule) => _buildTimeBar(date, schedule)),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withOpacity(0.04), blurRadius: 8),
           ],
-        ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  '$dayLabel ${date.day}/${date.month}',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: isSelected ? marron : Colors.black87,
+                  ),
+                ),
+                if (schedules.isEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade200,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Text(
+                      'Fermé',
+                      style: TextStyle(fontSize: 11, color: Colors.grey),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            // Barres horaires
+            if (schedules.isEmpty)
+              Container(
+                height: 10,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade200,
+                  borderRadius: BorderRadius.circular(5),
+                ),
+              ),
+
+            if (schedules.isNotEmpty)
+              ...schedules.map((schedule) => _buildTimeBar(date, schedule)),
+          ],
+        ),
       ),
     );
   }
@@ -487,66 +546,58 @@ class _ReservationScreenState extends State<ReservationScreen> {
     final endDT = DateTime(date.year, date.month, date.day, endHour, endMin);
     final totalMinutes = endDT.difference(startDT).inMinutes;
 
-    // Générer les segments de 30 min
-    List<Widget> segments = [];
-    DateTime current = startDT;
-
-    while (current.isBefore(endDT)) {
-      final segEnd = current.add(const Duration(minutes: 30));
-      final isOccupied = _isOccupied(current);
-      final isSelected = selectedDateTime != null &&
-          selectedDateTime!.year == current.year &&
-          selectedDateTime!.month == current.month &&
-          selectedDateTime!.day == current.day &&
-          selectedDateTime!.hour == current.hour &&
-          selectedDateTime!.minute == current.minute;
-
-      final segmentDT = current;
-
-      segments.add(
-        Expanded(
-          child: GestureDetector(
-            onTap: isOccupied
-                ? null
-                : () {
-              setState(() {
-                selectedDateTime =
-                selectedDateTime == segmentDT ? null : segmentDT;
-              });
-            },
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              height: 32,
-              margin: const EdgeInsets.symmetric(horizontal: 1),
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? marron
-                    : isOccupied
-                    ? rouge.withOpacity(0.7)
-                    : vert.withOpacity(0.7),
-                borderRadius: BorderRadius.circular(4),
-                border: isSelected
-                    ? Border.all(color: marron, width: 2)
-                    : null,
-              ),
-              child: isSelected
-                  ? const Icon(Icons.check, color: Colors.white, size: 14)
-                  : null,
-            ),
-          ),
-        ),
-      );
-
-      current = segEnd;
-    }
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Barre des segments
-        Row(children: segments),
+        // Barre visuelle
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final width = constraints.maxWidth;
+
+            // Construire les segments occupés
+            List<Widget> barSegments = [];
+            DateTime current = startDT;
+
+            while (current.isBefore(endDT)) {
+              final nextMinute = current.add(const Duration(minutes: 1));
+              final isOccupied = occupiedSlots.any((slot) =>
+              current.isAfter(slot['start']!.subtract(const Duration(minutes: 1))) &&
+                  current.isBefore(slot['end']!));
+
+              // Trouver la fin du segment actuel (même statut)
+              DateTime segEnd = current;
+              while (segEnd.isBefore(endDT)) {
+                final segOccupied = occupiedSlots.any((slot) =>
+                segEnd.isAfter(slot['start']!.subtract(const Duration(minutes: 1))) &&
+                    segEnd.isBefore(slot['end']!));
+                if (segOccupied != isOccupied) break;
+                segEnd = segEnd.add(const Duration(minutes: 1));
+              }
+
+              final segMinutes = segEnd.difference(current).inMinutes;
+              final segWidth = (segMinutes / totalMinutes) * width;
+
+              barSegments.add(
+                Container(
+                  width: segWidth,
+                  height: 16,
+                  color: isOccupied ? rouge.withOpacity(0.8) : vert.withOpacity(0.8),
+                ),
+              );
+
+              current = segEnd;
+            }
+
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Row(children: barSegments),
+            );
+          },
+        ),
+
         const SizedBox(height: 4),
-        // Heures début et fin
+
+        // Heures
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -563,6 +614,204 @@ class _ReservationScreenState extends State<ReservationScreen> {
         const SizedBox(height: 8),
       ],
     );
+  }
+
+  Widget _buildTimePicker() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Choisir l\'heure pour ${dayNames[weekdayToDay[selectedDate!.weekday]] ?? ''} ${selectedDate!.day}/${selectedDate!.month}',
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+              color: marron,
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // Sélecteur heure + minute
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // Heures
+              _buildScrollPicker(
+                value: selectedHour,
+                min: 0,
+                max: 23,
+                label: 'h',
+                onChanged: (val) {
+                  setState(() => selectedHour = val);
+                  _checkSlotStatus();
+                },
+              ),
+
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: Text(
+                  ':',
+                  style: TextStyle(
+                    fontSize: 32,
+                    fontWeight: FontWeight.bold,
+                    color: marron,
+                  ),
+                ),
+              ),
+
+              // Minutes
+              _buildScrollPicker(
+                value: selectedMinute,
+                min: 0,
+                max: 59,
+                label: 'min',
+                onChanged: (val) {
+                  setState(() => selectedMinute = val);
+                  _checkSlotStatus();
+                },
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 20),
+
+          // Statut du créneau
+          if (slotStatus != null)
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: slotStatus == 'available'
+                    ? vert.withOpacity(0.1)
+                    : slotStatus == 'occupied'
+                    ? rouge.withOpacity(0.1)
+                    : Colors.orange.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: slotStatus == 'available'
+                      ? vert
+                      : slotStatus == 'occupied'
+                      ? rouge
+                      : Colors.orange,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    slotStatus == 'available'
+                        ? Icons.check_circle
+                        : slotStatus == 'occupied'
+                        ? Icons.cancel
+                        : Icons.warning,
+                    color: slotStatus == 'available'
+                        ? vert
+                        : slotStatus == 'occupied'
+                        ? rouge
+                        : Colors.orange,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      slotStatus == 'available'
+                          ? '✅ Créneau disponible ! ${selectedHour.toString().padLeft(2, '0')}:${selectedMinute.toString().padLeft(2, '0')} → ${_formatEndTime()}'
+                          : slotStatus == 'occupied'
+                          ? '❌ Ce créneau est déjà occupé'
+                          : '⚠️ Hors des horaires de travail',
+                      style: TextStyle(
+                        color: slotStatus == 'available'
+                            ? vert
+                            : slotStatus == 'occupied'
+                            ? rouge
+                            : Colors.orange,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScrollPicker({
+    required int value,
+    required int min,
+    required int max,
+    required String label,
+    required Function(int) onChanged,
+  }) {
+    return Column(
+      children: [
+        Text(
+          label,
+          style: const TextStyle(fontSize: 12, color: Colors.grey),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          decoration: BoxDecoration(
+            color: marron.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: marron.withOpacity(0.3)),
+          ),
+          child: Column(
+            children: [
+              // Bouton +
+              IconButton(
+                onPressed: () {
+                  final newVal = value < max ? value + 1 : min;
+                  onChanged(newVal);
+                },
+                icon: const Icon(Icons.keyboard_arrow_up, color: marron),
+              ),
+              // Valeur
+              Container(
+                width: 70,
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text(
+                  value.toString().padLeft(2, '0'),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 32,
+                    fontWeight: FontWeight.bold,
+                    color: marron,
+                  ),
+                ),
+              ),
+              // Bouton -
+              IconButton(
+                onPressed: () {
+                  final newVal = value > min ? value - 1 : max;
+                  onChanged(newVal);
+                },
+                icon: const Icon(Icons.keyboard_arrow_down, color: marron),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _formatEndTime() {
+    final endDT = DateTime(
+      selectedDate!.year,
+      selectedDate!.month,
+      selectedDate!.day,
+      selectedHour,
+      selectedMinute,
+    ).add(Duration(minutes: totalDuration));
+    return '${endDT.hour.toString().padLeft(2, '0')}:${endDT.minute.toString().padLeft(2, '0')}';
   }
 
   Widget _buildConfirmButton() {
@@ -590,34 +839,14 @@ class _ReservationScreenState extends State<ReservationScreen> {
         ),
         child: isSubmitting
             ? const CircularProgressIndicator(color: Colors.white)
-            : Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.calendar_today, size: 18),
-            const SizedBox(width: 8),
-            Text(
-              'Confirmer • ${_formatDate(selectedDateTime!)} • ${_formatTime(selectedDateTime!)}',
-              style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
+            : Text(
+          'Confirmer • ${selectedHour.toString().padLeft(2, '0')}:${selectedMinute.toString().padLeft(2, '0')} • ${totalPrice.toStringAsFixed(0)} MAD',
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.bold,
+          ),
         ),
       ),
     );
-  }
-
-  String _formatDate(DateTime dt) {
-    const months = [
-      'Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun',
-      'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'
-    ];
-    const days = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
-    return '${days[dt.weekday - 1]} ${dt.day} ${months[dt.month - 1]}';
-  }
-
-  String _formatTime(DateTime dt) {
-    return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 }
