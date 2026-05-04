@@ -43,6 +43,8 @@ dependencies:
   flutter_polyline_points: ^3.1.0
   google_sign_in: ^7.2.0
   stomp_dart_client: ^3.0.1
+  image_picker: ^1.0.4
+  flutter_stripe: ^10.1.1
 
 dev_dependencies:
   flutter_test:

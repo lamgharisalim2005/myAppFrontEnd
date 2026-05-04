@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import '../../services/api_service.dart';
 import 'dart:convert';
+import '../../services/websocket_service.dart';
 
 class NotificationsScreen extends StatefulWidget {
   final String token;
@@ -22,6 +23,13 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   void initState() {
     super.initState();
     _fetchNotifications();
+
+    // Recharger automatiquement quand une nouvelle notification arrive
+    WebSocketService().notificationsStream.listen((data) {
+      if (mounted) {
+        _fetchNotifications();
+      }
+    });
   }
 
   Future<void> _fetchNotifications() async {
@@ -31,20 +39,16 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         errorMessage = null;
       });
 
-      final response = await http.get(
-        Uri.parse('http://192.168.0.144:8080/api/notifications/user'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${widget.token}',
-        },
-      ).timeout(const Duration(seconds: 10));
+      final response = await ApiService.get(
+        'http://127.0.0.1:8080/api/notifications/user',
+        widget.token,
+      );
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data['status'] == 'success') {
           setState(() {
             notifications = List<Map<String, dynamic>>.from(data['data']);
-            // Trier : non lues en premier, puis par date
             notifications.sort((a, b) {
               if (a['readStatus'] != b['readStatus']) {
                 return a['readStatus'] ? 1 : -1;
@@ -73,25 +77,26 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     if (notifications[index]['readStatus'] == true) return;
 
     try {
-      final response = await http.put(
-        Uri.parse('http://192.168.0.144:8080/api/notifications/$notificationId/read'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${widget.token}',
-        },
-      ).timeout(const Duration(seconds: 10));
+      final response = await ApiService.put(
+        'http://127.0.0.1:8080/api/notifications/$notificationId/read',
+        widget.token,
+      );
 
       if (response.statusCode == 200) {
         setState(() {
           notifications[index]['readStatus'] = true;
         });
+        // Mettre à jour le badge dans home_screen
+        final newCount = notifications
+            .where((n) => n['readStatus'] == false)
+            .length;
+        WebSocketService().updateUnreadNotificationsCount(newCount);
       }
     } catch (e) {
       debugPrint('Erreur: $e');
     }
   }
 
-  // Icône selon eventType
   IconData _getIcon(String? eventType) {
     switch (eventType) {
       case 'RESERVATION':
@@ -105,7 +110,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     }
   }
 
-  // Couleur selon eventType
   Color _getColor(String? eventType) {
     switch (eventType) {
       case 'RESERVATION':
@@ -119,7 +123,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     }
   }
 
-  // Temps relatif
   String _getTimeAgo(String createdAt) {
     final now = DateTime.now();
     final date = DateTime.parse(createdAt);
@@ -132,7 +135,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     return '${date.day}/${date.month}/${date.year}';
   }
 
-  // Nombre de notifications non lues
   int get unreadCount =>
       notifications.where((n) => n['readStatus'] == false).length;
 
@@ -142,7 +144,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         backgroundColor: marron,
-        iconTheme: const IconThemeData(color: Colors.white),
+        automaticallyImplyLeading: false,
         title: Row(
           children: [
             const Text(
@@ -173,7 +175,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           ],
         ),
         actions: [
-          // Marquer tout comme lu
           if (unreadCount > 0)
             TextButton(
               onPressed: () async {
@@ -293,7 +294,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Icône
               Container(
                 width: 46,
                 height: 46,
@@ -304,8 +304,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 child: Icon(icon, color: color, size: 22),
               ),
               const SizedBox(width: 12),
-
-              // Contenu
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -327,7 +325,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        // Point bleu si non lue
                         if (!isRead)
                           Container(
                             width: 10,

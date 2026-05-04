@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../public/home_screen.dart';
 import 'role_screen.dart';
+import '../../services/websocket_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -44,7 +45,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
       // 3. Vérifier si l'utilisateur existe
       final response = await http.post(
-        Uri.parse('http://192.168.0.144:8080/api/auth/google/check'),
+        Uri.parse('http://127.0.0.1:8080/api/auth/google/check'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({'idToken': idToken}),
       );
@@ -63,6 +64,9 @@ class _LoginScreenState extends State<LoginScreen> {
         await prefs.setString('role', role);
         await prefs.setString('name', name);
         await prefs.setString('userId', userId);
+
+// Initialiser le WebSocket global après connexion
+        WebSocketService().connect(token, userId);
 
         if (mounted) {
           Navigator.pushAndRemoveUntil(

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import '../../services/api_service.dart';
 import 'dart:convert';
 import '../../models/service.dart';
 import '../../models/work_schedule.dart';
@@ -72,26 +72,18 @@ class _ReservationScreenState extends State<ReservationScreen> {
         errorMessage = null;
       });
 
-      final results = await Future.wait([
-        http.get(
-          Uri.parse('http://192.168.0.144:8080/api/workschedules/coiffeur/${widget.coiffeurId}'),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ${widget.token}',
-          },
-        ).timeout(const Duration(seconds: 10)),
-        http.get(
-          Uri.parse('http://192.168.0.144:8080/api/reservations/coiffeur/${widget.coiffeurId}/slots'),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ${widget.token}',
-          },
-        ).timeout(const Duration(seconds: 10)),
-      ]);
+      final wsResponse = await ApiService.get(
+        'http://127.0.0.1:8080/api/workschedules/coiffeur/${widget.coiffeurId}',
+        widget.token,
+      );
+      final slotResponse = await ApiService.get(
+        'http://127.0.0.1:8080/api/reservations/coiffeur/${widget.coiffeurId}/slots',
+        widget.token,
+      );
 
-      if (results[0].statusCode == 200 && results[1].statusCode == 200) {
-        final wsData = json.decode(results[0].body);
-        final slotData = json.decode(results[1].body);
+      if (wsResponse.statusCode == 200 && slotResponse.statusCode == 200) {
+        final wsData = json.decode(wsResponse.body);
+        final slotData = json.decode(slotResponse.body);
 
         setState(() {
           workSchedules = (wsData['data'] as List)
@@ -208,18 +200,15 @@ class _ReservationScreenState extends State<ReservationScreen> {
     );
 
     try {
-      final response = await http.post(
-        Uri.parse('http://192.168.0.144:8080/api/reservations'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${widget.token}',
-        },
+      final response = await ApiService.post(
+        'http://127.0.0.1:8080/api/reservations',
+        widget.token,
         body: json.encode({
           'coiffeurId': widget.coiffeurId,
           'serviceIds': widget.selectedServices.map((s) => s.id).toList(),
           'startTime': selectedDT.toIso8601String(),
         }),
-      ).timeout(const Duration(seconds: 10));
+      );
 
       final data = json.decode(response.body);
 

@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import '../../services/api_service.dart';
 import 'dart:convert';
 import '../../models/coiffeur.dart';
 import 'coiffeur_detail_screen.dart';
-import '../auth/login_screen.dart';
 
 class SalonDetailScreen extends StatefulWidget {
   final String salonId;
   final String salonName;
   final String? token;
   final String? role;
+  final String? userId;
+  final bool isAdmin;
 
   const SalonDetailScreen({
     super.key,
@@ -17,6 +18,8 @@ class SalonDetailScreen extends StatefulWidget {
     required this.salonName,
     this.token,
     this.role,
+    this.userId,
+    this.isAdmin = false,
   });
 
   @override
@@ -56,13 +59,10 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
         errorMessage = null;
       });
 
-      final response = await http.get(
-        Uri.parse('http://192.168.0.144:8080/api/salons/${widget.salonId}/detail'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${widget.token}',
-        },
-      ).timeout(const Duration(seconds: 10));
+      final response = await ApiService.get(
+        'http://127.0.0.1:8080/api/salons/${widget.salonId}/detail',
+        widget.token ?? '',
+      );
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -101,14 +101,11 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
     setState(() => isLoadingAction = true);
 
     try {
-      final response = await http.post(
-        Uri.parse('http://192.168.0.144:8080/api/salon-requests'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${widget.token}',
-        },
+      final response = await ApiService.post(
+        'http://127.0.0.1:8080/api/salon-requests',
+        widget.token ?? '',
         body: json.encode({'salonId': widget.salonId}),
-      ).timeout(const Duration(seconds: 10));
+      );
 
       final data = json.decode(response.body);
 
@@ -442,6 +439,7 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
                                   coiffeurName: selectedCoiffeur!.name,
                                   token: widget.token,
                                   role: widget.role,
+                                  userId: widget.userId, // ← ajouter
                                 ),
                               ),
                             );
@@ -462,8 +460,8 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
 
                 const Divider(height: 32),
 
-                // Bouton Rejoindre (COIFFEUR seulement)
-                if (widget.role == 'COIFFEUR')
+                // Bouton Rejoindre (COIFFEUR seulement et pas admin)
+                if (widget.role == 'COIFFEUR' && !widget.isAdmin)
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(

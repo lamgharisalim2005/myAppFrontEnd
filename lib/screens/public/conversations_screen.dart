@@ -1,17 +1,22 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:stomp_dart_client/stomp_dart_client.dart';
+import '../../services/api_service.dart';
 import 'dart:convert';
 import 'chat_screen.dart';
+import '../../services/websocket_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class ConversationsScreen extends StatefulWidget {
   final String token;
   final String userId;
+  final VoidCallback? onNotificationReceived; // ← ajouter
+  final String? role; // ← ajouter
 
   const ConversationsScreen({
     super.key,
     required this.token,
     required this.userId,
+    this.role, // ← ajouter
+    this.onNotificationReceived, // ← ajouter
   });
 
   @override
@@ -22,21 +27,145 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
   static const Color marron = Color(0xFF795548);
 
   List<Map<String, dynamic>> conversations = [];
-  StompClient? _stompClient;
   bool isLoading = true;
   String? errorMessage;
+  Map<String, bool> onlineStatuses = {};
+  bool _selectionMode = false;
+  Set<String> _selectedConversations = {};
+
+
 
   @override
   void initState() {
     super.initState();
     _fetchConversations();
-    _connectWebSocket();
+
+    // Ecouter le statut en ligne en temps réel
+    WebSocketService().onlineStatusStream.listen((data) {
+      if (mounted) {
+        setState(() {
+          onlineStatuses[data['userId'].toString()] = data['online'] == true;
+        });
+      }
+    });
+
+    // Ecouter les nouveaux messages
+    WebSocketService().messagesStream.listen((data) {
+      if (mounted) {
+        // Si nouveau message → retirer la conversation des supprimées
+        _retirerConversationSupprimee(data['senderId']);
+        _fetchConversations();
+      }
+    });
+
+    WebSocketService().notificationsStream.listen((data) {
+      if (mounted) {
+        // Notifier home_screen de mettre à jour le badge
+        widget.onNotificationReceived?.call();
+      }
+    });
   }
 
   @override
   void dispose() {
-    _stompClient?.deactivate();
     super.dispose();
+  }
+
+  Future<void> _retirerConversationSupprimee(String senderId) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    // Retirer la conversation des supprimées
+    final deletedConversations = prefs.getStringList(
+        'deleted_conversations_${widget.token}') ?? [];
+    if (deletedConversations.contains(senderId)) {
+      deletedConversations.remove(senderId);
+      await prefs.setStringList(
+          'deleted_conversations_${widget.token}', deletedConversations);
+    }
+
+    // Retirer aussi le filtre des messages de cette conversation
+    final deletedMessages = prefs.getStringList(
+        'deleted_messages_${widget.token}') ?? [];
+    if (deletedMessages.contains('conv_$senderId')) {
+      deletedMessages.remove('conv_$senderId');
+      await prefs.setStringList(
+          'deleted_messages_${widget.token}', deletedMessages);
+    }
+  }
+
+  Future<void> _fetchOnlineStatuses() async {
+    for (var conversation in conversations) {
+      try {
+        final response = await ApiService.get(
+          'http://127.0.0.1:8080/api/messages/online/${conversation['userId']}',
+          widget.token,
+        );
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          if (mounted) {
+            setState(() {
+              onlineStatuses[conversation['userId']] = data['data'] == true;
+            });
+          }
+        }
+      } catch (e) {
+        debugPrint('Erreur online status: $e');
+      }
+    }
+  }
+
+  Future<void> _supprimerConversationsSelectionnees() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    // Supprimer les conversations
+    final deletedConversations = prefs.getStringList('deleted_conversations_${widget.token}') ?? [];
+    deletedConversations.addAll(_selectedConversations);
+    await prefs.setStringList('deleted_conversations_${widget.token}', deletedConversations);
+
+    // Supprimer aussi tous les messages de ces conversations
+    final deletedMessages = prefs.getStringList('deleted_messages_${widget.token}') ?? [];
+    for (var userId in _selectedConversations) {
+      // Trouver tous les messages de cette conversation
+      final conversation = conversations.firstWhere(
+            (c) => c['userId'] == userId,
+        orElse: () => {},
+      );
+      if (conversation.isNotEmpty) {
+        // Ajouter l'ID de conversation dans les messages supprimés
+        // pour filtrer lors du chargement
+        deletedMessages.add('conv_$userId');
+      }
+    }
+    await prefs.setStringList('deleted_messages_${widget.token}', deletedMessages);
+
+    setState(() {
+      conversations.removeWhere((c) => _selectedConversations.contains(c['userId']));
+      _selectedConversations.clear();
+      _selectionMode = false;
+    });
+  }
+
+  Future<List<String>> _getDeletedConversations() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getStringList('deleted_conversations_${widget.token}') ?? [];
+  }
+
+  Future<void> _ouvrirChat(Map<String, dynamic> conversation) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChatScreen(
+          token: widget.token,
+          otherUserId: conversation['userId'],
+          otherUserName: conversation['name'],
+          otherUserType: conversation['userType'],
+          otherProfilePicture: conversation['profilePicture'],
+          userId: widget.userId, // ← ajouter
+          role: widget.role,     // ← ajouter
+        ),
+      ),
+    );
+    _fetchConversations();
   }
 
   Future<void> _fetchConversations() async {
@@ -46,21 +175,28 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
         errorMessage = null;
       });
 
-      final response = await http.get(
-        Uri.parse('http://192.168.0.144:8080/api/messages/conversations'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${widget.token}',
-        },
-      ).timeout(const Duration(seconds: 10));
+      final response = await ApiService.get(
+        'http://127.0.0.1:8080/api/messages/conversations',
+        widget.token,
+      );
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data['status'] == 'success') {
+          final list = List<Map<String, dynamic>>.from(data['data']);
+
+          final totalUnread = list.fold<int>(
+              0, (sum, c) => sum + (c['unreadCount'] as int? ?? 0));
+          WebSocketService().updateUnreadMessagesCount(totalUnread);
+
+          final deletedConversations = await _getDeletedConversations();
           setState(() {
-            conversations = List<Map<String, dynamic>>.from(data['data']);
+            conversations = list
+                .where((c) => !deletedConversations.contains(c['userId']))
+                .toList();
             isLoading = false;
           });
+          _fetchOnlineStatuses();
         }
       } else {
         setState(() {
@@ -74,31 +210,6 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
         isLoading = false;
       });
     }
-  }
-
-  void _connectWebSocket() {
-    _stompClient = StompClient(
-      config: StompConfig(
-        url: 'ws://192.168.0.144:8080/ws/websocket',
-        onConnect: (frame) {
-          _stompClient!.subscribe(
-            destination: '/queue/messages/${widget.userId}',
-            callback: (frame) {
-              if (frame.body != null) {
-                _fetchConversations();
-              }
-            },
-          );
-        },
-        stompConnectHeaders: {
-          'Authorization': 'Bearer ${widget.token}',
-        },
-        webSocketConnectHeaders: {
-          'Authorization': 'Bearer ${widget.token}',
-        },
-      ),
-    );
-    _stompClient!.activate();
   }
 
   String _getTimeAgo(String? time) {
@@ -118,8 +229,35 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
-      appBar: AppBar(
+      appBar: _selectionMode
+          ? AppBar(
         backgroundColor: marron,
+        leading: IconButton(
+          icon: const Icon(Icons.close, color: Colors.white),
+          onPressed: () {
+            setState(() {
+              _selectionMode = false;
+              _selectedConversations.clear();
+            });
+          },
+        ),
+        title: Text(
+          '${_selectedConversations.length} sélectionné(s)',
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.delete_outline, color: Colors.white),
+            onPressed: () => _supprimerConversationsSelectionnees(),
+          ),
+        ],
+      )
+          : AppBar(
+        backgroundColor: marron,
+        automaticallyImplyLeading: false,
         iconTheme: const IconThemeData(color: Colors.white),
         title: const Text(
           'Messages',
@@ -204,28 +342,47 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
 
   Widget _buildConversationCard(Map<String, dynamic> conversation) {
     final isCoiffeur = conversation['userType'] == 'COIFFEUR';
+    final unreadCount = conversation['unreadCount'] as int? ?? 0;
+    final isSelected = _selectedConversations.contains(conversation['userId']);
 
     return GestureDetector(
+      onLongPress: () {
+        setState(() {
+          _selectionMode = true;
+          _selectedConversations.add(conversation['userId']);
+        });
+      },
       onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => ChatScreen(
-              token: widget.token,
-              otherUserId: conversation['userId'],
-              otherUserName: conversation['name'],
-              otherUserType: conversation['userType'],
-              otherProfilePicture: conversation['profilePicture'],
-            ),
-          ),
-        );
+        if (_selectionMode) {
+          setState(() {
+            if (isSelected) {
+              _selectedConversations.remove(conversation['userId']);
+              if (_selectedConversations.isEmpty) _selectionMode = false;
+            } else {
+              _selectedConversations.add(conversation['userId']);
+            }
+          });
+        } else {
+          _ouvrirChat(conversation);
+        }
       },
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: isSelected
+              ? marron.withOpacity(0.2)
+              : unreadCount > 0
+              ? marron.withOpacity(0.03)
+              : Colors.white,
           borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected
+                ? marron
+                : unreadCount > 0
+                ? marron.withOpacity(0.2)
+                : Colors.transparent,
+          ),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.05),
@@ -236,19 +393,39 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
         ),
         child: Row(
           children: [
-            CircleAvatar(
-              radius: 28,
-              backgroundColor: marron.withOpacity(0.1),
-              backgroundImage: conversation['profilePicture'] != null
-                  ? NetworkImage(conversation['profilePicture'])
-                  : null,
-              child: conversation['profilePicture'] == null
-                  ? Icon(
-                isCoiffeur ? Icons.content_cut : Icons.person,
-                color: marron,
-                size: 28,
-              )
-                  : null,
+            Stack(
+              children: [
+                CircleAvatar(
+                  radius: 28,
+                  backgroundColor: marron.withOpacity(0.1),
+                  backgroundImage: conversation['profilePicture'] != null
+                      ? NetworkImage(conversation['profilePicture'])
+                      : null,
+                  child: conversation['profilePicture'] == null
+                      ? Icon(
+                    isCoiffeur ? Icons.content_cut : Icons.person,
+                    color: marron,
+                    size: 28,
+                  )
+                      : null,
+                ),
+                // Point statut en ligne
+                Positioned(
+                  right: 0,
+                  bottom: 0,
+                  child: Container(
+                    width: 14,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      color: (onlineStatuses[conversation['userId']] == true)
+                          ? Colors.green
+                          : Colors.grey,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2),
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -258,19 +435,29 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        conversation['name'] ?? '',
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black87,
+                      Flexible(
+                        child: Text(
+                          conversation['name'] ?? '',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: unreadCount > 0
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                            color: Colors.black87,
+                          ),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                       Text(
                         _getTimeAgo(conversation['lastMessageTime']),
                         style: TextStyle(
                           fontSize: 12,
-                          color: Colors.grey.shade400,
+                          color: unreadCount > 0
+                              ? marron
+                              : Colors.grey.shade400,
+                          fontWeight: unreadCount > 0
+                              ? FontWeight.bold
+                              : FontWeight.normal,
                         ),
                       ),
                     ],
@@ -302,7 +489,12 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                           conversation['lastMessage'] ?? '',
                           style: TextStyle(
                             fontSize: 13,
-                            color: Colors.grey.shade600,
+                            color: unreadCount > 0
+                                ? Colors.black87
+                                : Colors.grey.shade600,
+                            fontWeight: unreadCount > 0
+                                ? FontWeight.w600
+                                : FontWeight.normal,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -313,6 +505,26 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                 ],
               ),
             ),
+            const SizedBox(width: 8),
+            // Badge messages non lus ou icône sélection
+            if (isSelected)
+              const Icon(Icons.check_circle, color: marron, size: 24)
+            else if (unreadCount > 0)
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: const BoxDecoration(
+                  color: Colors.red,
+                  shape: BoxShape.circle,
+                ),
+                child: Text(
+                  '$unreadCount',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
           ],
         ),
       ),

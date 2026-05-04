@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import '../../services/api_service.dart';
 import 'dart:convert';
 import '../../models/service.dart';
-import '../auth/login_screen.dart';
+import '../public/chat_screen.dart';
 import '../client/reservation_screen.dart';
 
 class CoiffeurDetailScreen extends StatefulWidget {
@@ -10,6 +10,7 @@ class CoiffeurDetailScreen extends StatefulWidget {
   final String coiffeurName;
   final String? token;
   final String? role;
+  final String? userId; // ← ajouter
 
   const CoiffeurDetailScreen({
     super.key,
@@ -17,6 +18,7 @@ class CoiffeurDetailScreen extends StatefulWidget {
     required this.coiffeurName,
     this.token,
     this.role,
+    this.userId, // ← ajouter
   });
 
   @override
@@ -60,13 +62,10 @@ class _CoiffeurDetailScreenState extends State<CoiffeurDetailScreen> {
         errorMessage = null;
       });
 
-      final response = await http.get(
-        Uri.parse('http://192.168.0.144:8080/api/coiffeurs/${widget.coiffeurId}/detail'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${widget.token}',
-        },
-      ).timeout(const Duration(seconds: 10));
+      final response = await ApiService.get(
+        'http://127.0.0.1:8080/api/coiffeurs/${widget.coiffeurId}/detail',
+        widget.token ?? '',
+      );
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -178,6 +177,28 @@ class _CoiffeurDetailScreenState extends State<CoiffeurDetailScreen> {
               fontWeight: FontWeight.bold,
             ),
           ),
+          actions: [
+            if (widget.token != null &&
+                widget.userId != null &&
+                widget.userId != widget.coiffeurId)
+              IconButton(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ChatScreen(
+                        token: widget.token!,
+                        otherUserId: widget.coiffeurId,
+                        otherUserName: widget.coiffeurName,
+                        otherUserType: 'COIFFEUR',
+                        otherProfilePicture: profilePicture,
+                      ),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.message, color: Colors.white),
+              ),
+          ],
           flexibleSpace: FlexibleSpaceBar(
             background: photos.isEmpty
                 ? Container(

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:stomp_dart_client/stomp_dart_client.dart';
+import '../../services/api_service.dart';
+import '../../services/websocket_service.dart';
 import 'dart:convert';
+import 'dart:async';
+import 'public_profile_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class ChatScreen extends StatefulWidget {
   final String token;
@@ -9,6 +12,8 @@ class ChatScreen extends StatefulWidget {
   final String otherUserName;
   final String otherUserType;
   final String? otherProfilePicture;
+  final String? userId;    // ← ajouter
+  final String? role;      // ← ajouter
 
   const ChatScreen({
     super.key,
@@ -17,6 +22,8 @@ class ChatScreen extends StatefulWidget {
     required this.otherUserName,
     required this.otherUserType,
     this.otherProfilePicture,
+    this.userId,    // ← ajouter
+    this.role,      // ← ajouter
   });
 
   @override
@@ -34,15 +41,39 @@ class _ChatScreenState extends State<ChatScreen> {
   String? errorMessage;
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  StreamSubscription? _messageSubscription; // ← ici
+  bool _isBlocked = false; // j'ai bloqué l'autre
+  bool _isBlockedByOther = false; // l'autre m'a bloqué
+  bool _selectionMode = false;
+  Set<String> _selectedMessages = {};
 
-  void _listenOnlineStatus() {
-    // Vérifier le statut toutes les 30 secondes
-    Future.delayed(const Duration(seconds: 30), () {
-      if (mounted) {
-        _checkOnlineStatus();
-        _listenOnlineStatus();
-      }
-    });
+  void _confirmerBlock() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(_isBlocked ? 'Débloquer' : 'Bloquer'),
+        content: Text(_isBlocked
+            ? 'Voulez-vous débloquer ${widget.otherUserName} ?'
+            : 'Voulez-vous bloquer ${widget.otherUserName} ?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Non'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _toggleBlock();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _isBlocked ? Colors.green : Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: Text(_isBlocked ? 'Débloquer' : 'Bloquer'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -50,24 +81,61 @@ class _ChatScreenState extends State<ChatScreen> {
     super.initState();
     _fetchMessages();
     _checkOnlineStatus();
-    _listenOnlineStatus(); // ← Ajoute ça
+    _checkBlockStatus();
+
+    // Ecouter le statut en ligne en temps réel
+    WebSocketService().onlineStatusStream.listen((data) {
+      if (mounted) {
+        if (data['userId'].toString() == widget.otherUserId.toString()) {
+          setState(() {
+            _isOtherOnline = data['online'] == true;
+          });
+        }
+        // Recheck toujours via API pour être sûr
+        _checkOnlineStatus();
+      }
+    });
+
+    _messageSubscription = WebSocketService().messagesStream.listen((data) {
+      if (mounted) {
+        // Vérifier si c'est une mise à jour de statut d'un message existant
+        final existingIndex = messages.indexWhere((m) => m['id'] == data['id']);
+
+        if (existingIndex != -1) {
+          // Mettre à jour le statut du message existant
+          setState(() {
+            messages[existingIndex] = {
+              ...messages[existingIndex],
+              'status': data['status'],
+            };
+          });
+        } else if (data['senderId'] == widget.otherUserId) {
+          // Nouveau message de l'autre personne
+          setState(() {
+            messages.add(data);
+          });
+          _scrollToBottom();
+          _markAsRead(data['id']);
+        }
+      }
+    });
   }
 
   @override
   void dispose() {
+    _messageSubscription?.cancel();
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
   Future<void> _checkOnlineStatus() async {
     try {
-      final response = await http.get(
-        Uri.parse('http://192.168.0.144/api/messages/online/${widget.otherUserId}'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${widget.token}',
-        },
+      final response = await ApiService.get(
+        'http://127.0.0.1:8080/api/messages/online/${widget.otherUserId}',
+        widget.token,
       );
+      debugPrint('🔍 otherUserId: ${widget.otherUserId}'); // ← ajouter
+      debugPrint('🔍 Online response: ${response.body}'); // ← ajouter
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         setState(() {
@@ -79,6 +147,70 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Future<void> _supprimerMessage(String messageId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final deletedMessages = prefs.getStringList('deleted_messages_${widget.token}') ?? [];
+    deletedMessages.add(messageId);
+    await prefs.setStringList('deleted_messages_${widget.token}', deletedMessages);
+    setState(() {
+      messages.removeWhere((m) => m['id'] == messageId);
+    });
+  }
+
+  Future<List<String>> _getDeletedMessages() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getStringList('deleted_messages_${widget.token}') ?? [];
+  }
+
+  Future<void> _checkBlockStatus() async {
+    try {
+      final response = await ApiService.get(
+        'http://127.0.0.1:8080/api/blocks/${widget.otherUserId}',
+        widget.token,
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() {
+          _isBlocked = data['data'] == true;
+        });
+      }
+    } catch (e) {
+      debugPrint('Erreur check block: $e');
+    }
+  }
+
+  Future<void> _toggleBlock() async {
+    try {
+      final response = _isBlocked
+          ? await ApiService.delete(
+        'http://127.0.0.1:8080/api/blocks/${widget.otherUserId}',
+        widget.token,
+      )
+          : await ApiService.post(
+        'http://127.0.0.1:8080/api/blocks/${widget.otherUserId}',
+        widget.token,
+      );
+
+      if (response.statusCode == 200) {
+        setState(() {
+          _isBlocked = !_isBlocked;
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(_isBlocked
+                  ? '🚫 Utilisateur bloqué'
+                  : '✅ Utilisateur débloqué'),
+              backgroundColor: marron,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Erreur toggle block: $e');
+    }
+  }
+
   Future<void> _fetchMessages() async {
     try {
       setState(() {
@@ -86,25 +218,23 @@ class _ChatScreenState extends State<ChatScreen> {
         errorMessage = null;
       });
 
-      final response = await http.get(
-        Uri.parse(
-          'http://192.168.0.144:8080/api/messages/conversation?otherUserId=${widget.otherUserId}',
-        ),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${widget.token}',
-        },
-      ).timeout(const Duration(seconds: 10));
+      final response = await ApiService.get(
+        'http://127.0.0.1:8080/api/messages/conversation?otherUserId=${widget.otherUserId}',
+        widget.token,
+      );
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data['status'] == 'success') {
+          final deletedMessages = await _getDeletedMessages();
           setState(() {
-            messages = List<Map<String, dynamic>>.from(data['data']);
+            messages = List<Map<String, dynamic>>.from(data['data'])
+                .where((m) => !deletedMessages.contains(m['id'])
+                && !deletedMessages.contains('conv_${widget.otherUserId}'))
+                .toList();
             isLoading = false;
           });
           _scrollToBottom();
-          // Marquer tous les messages non lus comme lus
           _markAllAsRead();
         }
       } else {
@@ -123,12 +253,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _markAsRead(String messageId) async {
     try {
-      await http.put(
-        Uri.parse('http://192.168.0.144:8080/api/messages/$messageId/read'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${widget.token}',
-        },
+      await ApiService.put(
+        'http://127.0.0.1:8080/api/messages/$messageId/read',
+        widget.token,
       );
     } catch (e) {
       debugPrint('Erreur mark as read: $e');
@@ -143,6 +270,18 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Future<void> _supprimerMessagesSelectionnes() async {
+    final prefs = await SharedPreferences.getInstance();
+    final deletedMessages = prefs.getStringList('deleted_messages_${widget.token}') ?? [];
+    deletedMessages.addAll(_selectedMessages);
+    await prefs.setStringList('deleted_messages_${widget.token}', deletedMessages);
+    setState(() {
+      messages.removeWhere((m) => _selectedMessages.contains(m['id']));
+      _selectedMessages.clear();
+      _selectionMode = false;
+    });
+  }
+
   Future<void> _sendMessage() async {
     final content = _messageController.text.trim();
     if (content.isEmpty) return;
@@ -151,17 +290,14 @@ class _ChatScreenState extends State<ChatScreen> {
     _messageController.clear();
 
     try {
-      final response = await http.post(
-        Uri.parse('http://192.168.0.144:8080/api/messages'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${widget.token}',
-        },
+      final response = await ApiService.post(
+        'http://127.0.0.1:8080/api/messages',
+        widget.token,
         body: json.encode({
           'receiverId': widget.otherUserId,
           'content': content,
         }),
-      ).timeout(const Duration(seconds: 10));
+      );
 
       if (response.statusCode == 201) {
         final data = json.decode(response.body);
@@ -215,62 +351,136 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
-      appBar: AppBar(
+      appBar: _selectionMode
+          ? AppBar(
+        backgroundColor: marron,
+        leading: IconButton(
+          icon: const Icon(Icons.close, color: Colors.white),
+          onPressed: () {
+            setState(() {
+              _selectionMode = false;
+              _selectedMessages.clear();
+            });
+          },
+        ),
+        title: Text(
+          '${_selectedMessages.length} sélectionné(s)',
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.delete_outline, color: Colors.white),
+            onPressed: () => _supprimerMessagesSelectionnes(),
+          ),
+        ],
+      )
+          : AppBar(
         backgroundColor: marron,
         iconTheme: const IconThemeData(color: Colors.white),
-        title: Row(
-          children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: Colors.white24,
-              backgroundImage: widget.otherProfilePicture != null
-                  ? NetworkImage(widget.otherProfilePicture!)
-                  : null,
-              child: widget.otherProfilePicture == null
-                  ? Icon(
-                widget.otherUserType == 'COIFFEUR'
-                    ? Icons.content_cut
-                    : Icons.person,
-                color: Colors.white,
-                size: 18,
-              )
-                  : null,
-            ),
-            const SizedBox(width: 10),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.otherUserName,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
+        title: GestureDetector(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => PublicProfileScreen(
+                  userId: widget.otherUserId,
+                  userType: widget.otherUserType,
+                  token: widget.token,
+                  currentUserId: widget.userId, // ← ajouter
+                  currentUserRole: widget.role, // ← ajouter
                 ),
-                Row(
-                  children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                      ),
+              ),
+            );
+          },
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: Colors.white24,
+                backgroundImage: widget.otherProfilePicture != null
+                    ? NetworkImage(widget.otherProfilePicture!)
+                    : null,
+                child: widget.otherProfilePicture == null
+                    ? Icon(
+                  widget.otherUserType == 'COIFFEUR'
+                      ? Icons.content_cut
+                      : Icons.person,
+                  color: Colors.white,
+                  size: 18,
+                )
+                    : null,
+              ),
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.otherUserName,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
                     ),
-                    const SizedBox(width: 4),
+                  ),
+                  Row(
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: _isOtherOnline
+                              ? Colors.greenAccent
+                              : Colors.grey,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _isOtherOnline ? 'En ligne' : 'Hors ligne',
+                        style: TextStyle(
+                          color: _isOtherOnline
+                              ? Colors.greenAccent
+                              : Colors.white70,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert, color: Colors.white),
+            onSelected: (value) {
+              if (value == 'block') {
+                _confirmerBlock();
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'block',
+                child: Row(
+                  children: [
+                    Icon(
+                      _isBlocked ? Icons.lock_open : Icons.block,
+                      color: _isBlocked ? Colors.green : Colors.red,
+                    ),
+                    const SizedBox(width: 8),
                     Text(
-                      widget.otherUserType == 'COIFFEUR' ? 'Coiffeur' : 'Client',
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 12,
+                      _isBlocked ? 'Débloquer' : 'Bloquer',
+                      style: TextStyle(
+                        color: _isBlocked ? Colors.green : Colors.red,
                       ),
                     ),
                   ],
                 ),
-              ],
-            ),
-          ],
-        ),
+              ),
+            ],
+          ),
+        ],
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator(color: marron))
@@ -370,102 +580,146 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildMessageBubble(Map<String, dynamic> message, bool isMe) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        mainAxisAlignment:
-        isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          if (!isMe) ...[
-            CircleAvatar(
-              radius: 16,
-              backgroundColor: marron.withOpacity(0.1),
-              backgroundImage: widget.otherProfilePicture != null
-                  ? NetworkImage(widget.otherProfilePicture!)
-                  : null,
-              child: widget.otherProfilePicture == null
-                  ? Icon(
-                widget.otherUserType == 'COIFFEUR'
-                    ? Icons.content_cut
-                    : Icons.person,
-                color: marron,
-                size: 16,
-              )
-                  : null,
-            ),
-            const SizedBox(width: 8),
-          ],
+    final isSelected = _selectedMessages.contains(message['id']);
 
-          Flexible(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: isMe ? marron : Colors.white,
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(16),
-                  topRight: const Radius.circular(16),
-                  bottomLeft: Radius.circular(isMe ? 16 : 4),
-                  bottomRight: Radius.circular(isMe ? 4 : 16),
+    return GestureDetector(
+      onLongPress: () {
+        setState(() {
+          _selectionMode = true;
+          _selectedMessages.add(message['id']);
+        });
+      },
+      onTap: () {
+        if (_selectionMode) {
+          setState(() {
+            if (isSelected) {
+              _selectedMessages.remove(message['id']);
+              if (_selectedMessages.isEmpty) _selectionMode = false;
+            } else {
+              _selectedMessages.add(message['id']);
+            }
+          });
+        }
+      },
+      child: Container(
+        color: isSelected ? marron.withOpacity(0.2) : Colors.transparent,
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(
+            mainAxisAlignment:
+            isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (!isMe) ...[
+                CircleAvatar(
+                  radius: 16,
+                  backgroundColor: marron.withOpacity(0.1),
+                  backgroundImage: widget.otherProfilePicture != null
+                      ? NetworkImage(widget.otherProfilePicture!)
+                      : null,
+                  child: widget.otherProfilePicture == null
+                      ? Icon(
+                    widget.otherUserType == 'COIFFEUR'
+                        ? Icons.content_cut
+                        : Icons.person,
+                    color: marron,
+                    size: 16,
+                  )
+                      : null,
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 4,
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment:
-                isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    message['content'] ?? '',
-                    style: TextStyle(
-                      color: isMe ? Colors.white : Colors.black87,
-                      fontSize: 15,
+                const SizedBox(width: 8),
+              ],
+              Flexible(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? marron.withOpacity(0.6)
+                        : isMe
+                        ? marron
+                        : Colors.white,
+                    borderRadius: BorderRadius.only(
+                      topLeft: const Radius.circular(16),
+                      topRight: const Radius.circular(16),
+                      bottomLeft: Radius.circular(isMe ? 16 : 4),
+                      bottomRight: Radius.circular(isMe ? 4 : 16),
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        _formatTime(message['createdAt']),
-                        style: TextStyle(
-                          color: isMe ? Colors.white70 : Colors.grey,
-                          fontSize: 11,
-                        ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.05),
+                        blurRadius: 4,
                       ),
-                      // Statut message (seulement pour mes messages)
-                      if (isMe) ...[
-                        const SizedBox(width: 4),
-                        Icon(
-                          message['status'] == 'READ'
-                              ? Icons.done_all
-                              : message['status'] == 'DELIVERED'
-                              ? Icons.done_all
-                              : Icons.done,
-                          size: 14,
-                          color: message['status'] == 'READ'
-                              ? Colors.blue
-                              : Colors.white70,
-                        ),
-                      ],
                     ],
                   ),
-                ],
+                  child: Column(
+                    crossAxisAlignment:
+                    isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        message['content'] ?? '',
+                        style: TextStyle(
+                          color: isMe ? Colors.white : Colors.black87,
+                          fontSize: 15,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _formatTime(message['createdAt']),
+                            style: TextStyle(
+                              color: isMe ? Colors.white70 : Colors.grey,
+                              fontSize: 11,
+                            ),
+                          ),
+                          if (isMe) ...[
+                            const SizedBox(width: 4),
+                            Icon(
+                              message['status'] == 'READ'
+                                  ? Icons.done_all
+                                  : message['status'] == 'DELIVERED'
+                                  ? Icons.done_all
+                                  : Icons.done,
+                              size: 14,
+                              color: message['status'] == 'READ'
+                                  ? Colors.blue
+                                  : Colors.white70,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            ),
+              if (isMe) const SizedBox(width: 8),
+            ],
           ),
-
-          if (isMe) const SizedBox(width: 8),
-        ],
+        ),
       ),
     );
   }
 
   Widget _buildMessageInput() {
+    if (_isBlocked) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        color: Colors.white,
+        child: const Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.block, color: Colors.grey),
+            SizedBox(width: 8),
+            Text(
+              'Vous avez bloqué cet utilisateur',
+              style: TextStyle(color: Colors.grey),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(

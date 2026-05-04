@@ -1,27 +1,27 @@
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'dart:ui' as ui;
 import '../../models/salon.dart';
-import '../auth/login_screen.dart';
 import '../public/salon_detail_screen.dart';
+import '../public/profile_screen.dart';
+import '../client/reservations_screen.dart';
 import 'notifications_screen.dart';
 import 'conversations_screen.dart';
-import 'package:stomp_dart_client/stomp_dart_client.dart';
-int unreadNotifications = 0;
+import '../../services/websocket_service.dart';
+import '../../services/api_service.dart';
+
 class HomeScreen extends StatefulWidget {
   final String? token;
   final String? role;
-  final String? userId; // ← Ajoute ça
+  final String? userId;
 
   const HomeScreen({
     super.key,
     this.token,
     this.role,
-    this.userId, // ← Ajoute ça
+    this.userId,
   });
 
   @override
@@ -29,6 +29,10 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  int _currentIndex = 0;
+  int _newSalonsCount = 0;
+  bool _isAdmin = false;
+
   GoogleMapController? mapController;
   List<Salon> salons = [];
   Set<Marker> markers = {};
@@ -39,7 +43,6 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController searchController = TextEditingController();
   bool showSearchResults = false;
   List<Salon> searchResults = [];
-  StompClient? _stompClient;
 
   static const String orsApiKey = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImQyZTc2ZjVjMzFhNzRhZTFiNTllZTkxZmI1MzcwNjVhIiwiaCI6Im11cm11cjY0In0=';
   static const Color marron = Color(0xFF795548);
@@ -48,37 +51,6 @@ class _HomeScreenState extends State<HomeScreen> {
     target: LatLng(34.0209, -5.0078),
     zoom: 15,
   );
-  void _connectWebSocket() {
-    _stompClient = StompClient(
-      config: StompConfig(
-        url: 'ws://192.168.0.128:8080/ws/websocket',
-        onConnect: (frame) {
-          debugPrint('✅ WebSocket connecté !');
-
-          // S'abonner aux nouvelles notifications
-          _stompClient!.subscribe(
-            destination: '/queue/notifications/${widget.userId}',
-            callback: (frame) {
-              if (frame.body != null) {
-                // Nouvelle notification reçue → mettre à jour le badge
-                setState(() {
-                  unreadNotifications++;
-                });
-              }
-            },
-          );
-        },
-        onDisconnect: (_) => debugPrint('❌ WebSocket déconnecté !'),
-        stompConnectHeaders: {
-          'Authorization': 'Bearer ${widget.token}',
-        },
-        webSocketConnectHeaders: {
-          'Authorization': 'Bearer ${widget.token}',
-        },
-      ),
-    );
-    _stompClient!.activate();
-  }
 
   @override
   void initState() {
@@ -86,34 +58,97 @@ class _HomeScreenState extends State<HomeScreen> {
     fetchSalons();
     _getUserLocation();
     _fetchUnreadCount();
-    _connectWebSocket(); // ← Ajoute ça
+    _fetchUnreadMessagesCount();
+    _fetchIsAdmin();
+
+    WebSocketService().notificationsStream.listen((data) {
+      if (mounted) {
+        _fetchUnreadCount();
+      }
+    });
+
+    WebSocketService().salonsStream.listen((event) {
+      if (mounted) {
+        setState(() {
+          _newSalonsCount++;
+        });
+        fetchSalons();
+      }
+    });
+
+    WebSocketService().unreadMessagesStream.listen((count) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+
+    WebSocketService().unreadNotificationsStream.listen((count) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
   }
-  Future<void> _fetchUnreadCount() async {
+
+  Future<void> _fetchIsAdmin() async {
+    if (widget.role != 'COIFFEUR') return;
     try {
-      final response = await http.get(
-        Uri.parse('http://192.168.0.144:8080/api/notifications/user'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${widget.token}',
-        },
+      final response = await ApiService.get(
+        'http://127.0.0.1:8080/api/coiffeurs/profile',
+        widget.token ?? '',
+      );
+      final data = json.decode(response.body);
+      debugPrint('🔍 Profile data: ${data['data']}');
+      if (data['status'] == 'success') {
+        setState(() {
+          _isAdmin = data['data']['isAdmin'] as bool;
+        });
+        debugPrint('🔍 isAdmin: $_isAdmin');
+      }
+    } catch (e) {
+      debugPrint('Erreur fetch isAdmin: $e');
+    }
+  }
+
+  Future<void> _fetchUnreadMessagesCount() async {
+    try {
+      final response = await ApiService.get(
+        'http://127.0.0.1:8080/api/messages/conversations',
+        widget.token ?? '',
       );
       final data = json.decode(response.body);
       if (data['status'] == 'success') {
-        setState(() {
-          unreadNotifications = (data['data'] as List)
-              .where((n) => n['readStatus'] == false)
-              .length;
-        });
+        final list = data['data'] as List;
+        final totalUnread = list.fold<int>(
+            0, (sum, c) => sum + (c['unreadCount'] as int? ?? 0));
+        WebSocketService().updateUnreadMessagesCount(totalUnread);
+        if (mounted) setState(() {});
+      }
+    } catch (e) {
+      debugPrint('Erreur unread messages: $e');
+    }
+  }
+
+  Future<void> _fetchUnreadCount() async {
+    try {
+      final response = await ApiService.get(
+        'http://127.0.0.1:8080/api/notifications/user',
+        widget.token ?? '',
+      );
+      final data = json.decode(response.body);
+      if (data['status'] == 'success') {
+        final count = (data['data'] as List)
+            .where((n) => n['readStatus'] == false)
+            .length;
+        WebSocketService().updateUnreadNotificationsCount(count);
+        if (mounted) setState(() {});
       }
     } catch (e) {
       debugPrint('Erreur: $e');
     }
   }
 
-
   @override
   void dispose() {
-    _stompClient?.deactivate();
     super.dispose();
   }
 
@@ -142,6 +177,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _goToUserLocation() async {
     if (userPosition == null) await _getUserLocation();
+    if (userPosition == null) return;
     mapController?.animateCamera(
       CameraUpdate.newLatLngZoom(
         LatLng(userPosition!.latitude, userPosition!.longitude),
@@ -151,24 +187,22 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> fetchSalons() async {
+    setState(() => isLoading = true);
     try {
-      final response = await http.get(
-        Uri.parse('http://192.168.0.144:8080/api/salons'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${widget.token}',
-        },
+      final response = await ApiService.get(
+        'http://127.0.0.1:8080/api/salons',
+        widget.token ?? '',
       );
       final data = json.decode(response.body);
       if (response.statusCode == 200 && data['status'] == 'success') {
         final List listeSalons = data['data'];
         salons = listeSalons.map((s) => Salon.fromJson(s)).toList();
         await _createMarkers();
-        setState(() => isLoading = false);
       }
     } catch (e) {
-      setState(() => isLoading = false);
+      debugPrint('Erreur fetchSalons: $e');
     }
+    setState(() => isLoading = false);
   }
 
   Future<void> _createMarkers() async {
@@ -268,10 +302,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _showRoute() async {
     if (userPosition == null || selectedSalon == null) return;
     try {
-      final response = await http.get(
-        Uri.parse(
-          'https://api.openrouteservice.org/v2/directions/driving-car?api_key=$orsApiKey&start=${userPosition!.longitude},${userPosition!.latitude}&end=${selectedSalon!.longitude},${selectedSalon!.latitude}',
-        ),
+      final response = await ApiService.get(
+        'https://api.openrouteservice.org/v2/directions/driving-car?api_key=$orsApiKey&start=${userPosition!.longitude},${userPosition!.latitude}&end=${selectedSalon!.longitude},${selectedSalon!.latitude}',
+        '',
       );
       final data = json.decode(response.body);
       final List coords = data['features'][0]['geometry']['coordinates'];
@@ -356,193 +389,167 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Stack(
-        children: [
-          // 🗺️ GOOGLE MAP
-          GoogleMap(
-            zoomControlsEnabled: false,
-            initialCameraPosition: _initialPosition,
-            markers: markers,
-            polylines: polylines,
-            myLocationEnabled: true,
-            myLocationButtonEnabled: false,
-            compassEnabled: false,
-            mapToolbarEnabled: false,
-            onMapCreated: (controller) {
-              mapController = controller;
-              _goToUserLocation();
-            },
-            onTap: (_) {
-              setState(() {
-                selectedSalon = null;
-                polylines.clear();
-                showSearchResults = false;
-                searchController.clear();
-              });
-            },
-          ),
+  Widget _buildMapScreen() {
+    return Stack(
+      children: [
+        GoogleMap(
+          zoomControlsEnabled: false,
+          initialCameraPosition: _initialPosition,
+          markers: markers,
+          polylines: polylines,
+          myLocationEnabled: true,
+          myLocationButtonEnabled: false,
+          compassEnabled: false,
+          mapToolbarEnabled: false,
+          onMapCreated: (controller) {
+            mapController = controller;
+            _goToUserLocation();
+          },
+          onTap: (_) {
+            setState(() {
+              selectedSalon = null;
+              polylines.clear();
+              showSearchResults = false;
+              searchController.clear();
+            });
+          },
+        ),
 
-          // 🔍 BARRE DE RECHERCHE
+        Positioned(
+          top: 50,
+          left: 16,
+          right: 72,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 8)],
+            ),
+            child: TextField(
+              controller: searchController,
+              onChanged: filtrerSalons,
+              decoration: const InputDecoration(
+                hintText: 'Rechercher un salon...',
+                prefixIcon: Icon(Icons.search, color: marron),
+                border: InputBorder.none,
+                contentPadding: EdgeInsets.all(16),
+              ),
+            ),
+          ),
+        ),
+
+        if (showSearchResults)
           Positioned(
-            top: 50,
+            top: 110,
             left: 16,
-            right: 72,
+            width: 250,
             child: Container(
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(12),
                 boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 8)],
               ),
-              child: TextField(
-                controller: searchController,
-                onChanged: filtrerSalons,
-                decoration: const InputDecoration(
-                  hintText: 'Rechercher un salon...',
-                  prefixIcon: Icon(Icons.search, color: marron),
-                  border: InputBorder.none,
-                  contentPadding: EdgeInsets.all(16),
-                ),
-              ),
-            ),
-          ),
-
-          // 📋 Liste résultats recherche
-          if (showSearchResults)
-            Positioned(
-              top: 110,
-              left: 16,
-              width: 250,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 8)],
-                ),
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: searchResults.length,
-                  itemBuilder: (context, index) {
-                    final salon = searchResults[index];
-                    return ListTile(
-                      leading: const Text('✂️'),
-                      title: Text(
-                        salon.name,
-                        style: const TextStyle(fontWeight: FontWeight.bold, color: marron),
-                      ),
-                      subtitle: Text(salon.localisation),
-                      onTap: () {
-                        mapController?.animateCamera(
-                          CameraUpdate.newLatLngZoom(
-                            LatLng(salon.latitude, salon.longitude), 17,
-                          ),
-                        );
-                        setState(() {
-                          selectedSalon = salon;
-                          showSearchResults = false;
-                          searchController.clear();
-                        });
-                      },
-                    );
-                  },
-                ),
-              ),
-            ),
-
-          // Boutons à droite
-          Positioned(
-            top: 50,
-            right: 16,
-            child: Column(
-              children: [
-                // 🚪 Déconnexion
-                _buildMapButton(Icons.logout, () async {
-                  final prefs = await SharedPreferences.getInstance();
-                  await prefs.clear();
-                  if (context.mounted) {
-                    Navigator.pushAndRemoveUntil(
-                      context,
-                      MaterialPageRoute(builder: (_) => const LoginScreen()),
-                          (route) => false,
-                    );
-                  }
-                }),
-                const SizedBox(height: 8),
-                // 📍 Ma position
-                _buildMapButton(Icons.my_location, _goToUserLocation),
-                const SizedBox(height: 8),
-                // 🗺️ Itinéraire
-                _buildMapButton(
-                  Icons.directions,
-                  selectedSalon != null ? _showRoute : null,
-                ),
-                const SizedBox(height: 8),
-                // 🧭 Orientation
-                _buildMapButton(Icons.explore, () {
-                  mapController?.animateCamera(
-                    CameraUpdate.newCameraPosition(
-                      CameraPosition(
-                        target: LatLng(
-                          userPosition?.latitude ?? 34.0209,
-                          userPosition?.longitude ?? -5.0078,
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: searchResults.length,
+                itemBuilder: (context, index) {
+                  final salon = searchResults[index];
+                  return ListTile(
+                    leading: const Text('✂️'),
+                    title: Text(
+                      salon.name,
+                      style: const TextStyle(fontWeight: FontWeight.bold, color: marron),
+                    ),
+                    subtitle: Text(salon.localisation),
+                    onTap: () {
+                      mapController?.animateCamera(
+                        CameraUpdate.newLatLngZoom(
+                          LatLng(salon.latitude, salon.longitude), 17,
                         ),
-                        zoom: 16,
-                        bearing: 0,
-                      ),
-                    ),
+                      );
+                      setState(() {
+                        selectedSalon = salon;
+                        showSearchResults = false;
+                        searchController.clear();
+                      });
+                    },
                   );
-                }),
-              ],
+                },
+              ),
             ),
           ),
-          const SizedBox(height: 8),
-          // 🔄 Refresh
-          _buildMapButton(Icons.refresh, () {
-            fetchSalons();
-          }),
 
-          // 🏪 Carte salon sélectionné
-          if (selectedSalon != null)
-            Positioned(
-              bottom: widget.token != null ? 80 : 16,
-              left: 16,
-              right: 16,
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 10)],
-                ),
-                child: Row(
-                  children: [
-                    const Text('✂️', style: TextStyle(fontSize: 24)),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            selectedSalon!.name,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: marron,
-                            ),
-                          ),
-                          Text(
-                            selectedSalon!.localisation,
-                            style: const TextStyle(fontSize: 13, color: Colors.grey),
-                          ),
-                        ],
+        Positioned(
+          top: 50,
+          right: 16,
+          child: Column(
+            children: [
+              const SizedBox(height: 8),
+              _buildMapButton(Icons.my_location, _goToUserLocation),
+              const SizedBox(height: 8),
+              _buildMapButton(
+                Icons.directions,
+                selectedSalon != null ? _showRoute : null,
+              ),
+              const SizedBox(height: 8),
+              _buildMapButton(Icons.explore, () {
+                mapController?.animateCamera(
+                  CameraUpdate.newCameraPosition(
+                    CameraPosition(
+                      target: LatLng(
+                        userPosition?.latitude ?? 34.0209,
+                        userPosition?.longitude ?? -5.0078,
                       ),
+                      zoom: 16,
+                      bearing: 0,
                     ),
-                    ElevatedButton(
-                      onPressed: () {
-                        // TODO: aller vers détails salon je fais
+                  ),
+                );
+              }),
+            ],
+          ),
+        ),
+
+        if (selectedSalon != null)
+          Positioned(
+            bottom: 16,
+            left: 16,
+            right: 16,
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 10)],
+              ),
+              child: Row(
+                children: [
+                  const Text('✂️', style: TextStyle(fontSize: 24)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          selectedSalon!.name,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: marron,
+                          ),
+                        ),
+                        Text(
+                          selectedSalon!.localisation,
+                          style: const TextStyle(fontSize: 13, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                  ),
+                  ElevatedButton(
+                    onPressed: () async {
+                      await _fetchIsAdmin();
+                      if (mounted) {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
@@ -551,140 +558,222 @@ class _HomeScreenState extends State<HomeScreen> {
                               salonName: selectedSalon!.name,
                               token: widget.token,
                               role: widget.role,
+                              userId: widget.userId,
+                              isAdmin: _isAdmin,
                             ),
                           ),
                         );
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: marron,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: const Text('Détails'),
-                    ),
-                    IconButton(
-                      onPressed: () {
-                        setState(() {
-                          selectedSalon = null;
-                          polylines.clear();
-                        });
-                      },
-                      icon: const Icon(Icons.close, color: Colors.grey),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-          // ➕ Zoom +
-          Positioned(
-            bottom: widget.token != null ? 250 : 180,
-            right: 16,
-            child: Container(
-              decoration: BoxDecoration(
-                color: marron,
-                shape: BoxShape.circle,
-                boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 6)],
-              ),
-              child: IconButton(
-                onPressed: () {
-                  mapController?.animateCamera(CameraUpdate.zoomIn());
-                },
-                icon: const Icon(Icons.add, color: Colors.white),
-              ),
-            ),
-          ),
-
-          // ➖ Zoom -
-          Positioned(
-            bottom: widget.token != null ? 190 : 120,
-            right: 16,
-            child: Container(
-              decoration: BoxDecoration(
-                color: marron,
-                shape: BoxShape.circle,
-                boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 6)],
-              ),
-              child: IconButton(
-                onPressed: () {
-                  mapController?.animateCamera(CameraUpdate.zoomOut());
-                },
-                icon: const Icon(Icons.remove, color: Colors.white),
-              ),
-            ),
-          ),
-
-          if (isLoading)
-            const Center(child: CircularProgressIndicator()),
-        ],
-      ),
-
-      // 📱 BARRE DE NAVIGATION
-      bottomNavigationBar: BottomNavigationBar(
-        type: BottomNavigationBarType.fixed,
-        selectedItemColor: marron,
-        unselectedItemColor: marron,
-        backgroundColor: Colors.white,
-        currentIndex: 0,
-        onTap: (index) async {
-          if (index == 3) {
-            await Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => NotificationsScreen(token: widget.token!),
-              ),
-            );
-            _fetchUnreadCount();
-          }
-          if (index == 2) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ConversationsScreen(
-                  token: widget.token!,
-                  userId: widget.userId ?? '',
-                ),
-              ),
-            );
-          }
-        },
-        items: [
-          const BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Accueil'),
-          const BottomNavigationBarItem(icon: Icon(Icons.calendar_today), label: 'Réservations'),
-          const BottomNavigationBarItem(icon: Icon(Icons.message), label: 'Messages'),
-          BottomNavigationBarItem(
-            icon: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                const Icon(Icons.notifications),
-                if (unreadNotifications > 0)
-                  Positioned(
-                    right: -4,
-                    top: -4,
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: const BoxDecoration(
-                        color: Colors.red,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Text(
-                        '$unreadNotifications',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 9,
-                          fontWeight: FontWeight.bold,
-                        ),
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: marron,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
                       ),
                     ),
+                    child: const Text('Détails'),
                   ),
-              ],
+                  IconButton(
+                    onPressed: () {
+                      setState(() {
+                        selectedSalon = null;
+                        polylines.clear();
+                      });
+                    },
+                    icon: const Icon(Icons.close, color: Colors.grey),
+                  ),
+                ],
+              ),
             ),
-            label: 'Notifications',
           ),
-          const BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profil'),
-        ],
+
+        Positioned(
+          bottom: 250,
+          right: 16,
+          child: Container(
+            decoration: BoxDecoration(
+              color: marron,
+              shape: BoxShape.circle,
+              boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 6)],
+            ),
+            child: IconButton(
+              onPressed: () => mapController?.animateCamera(CameraUpdate.zoomIn()),
+              icon: const Icon(Icons.add, color: Colors.white),
+            ),
+          ),
+        ),
+
+        Positioned(
+          bottom: 190,
+          right: 16,
+          child: Container(
+            decoration: BoxDecoration(
+              color: marron,
+              shape: BoxShape.circle,
+              boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 6)],
+            ),
+            child: IconButton(
+              onPressed: () => mapController?.animateCamera(CameraUpdate.zoomOut()),
+              icon: const Icon(Icons.remove, color: Colors.white),
+            ),
+          ),
+        ),
+
+        if (isLoading)
+          const Center(child: CircularProgressIndicator()),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        if (_currentIndex != 0) {
+          setState(() {
+            _currentIndex = 0;
+          });
+        }
+      },
+      child: Scaffold(
+        body: IndexedStack(
+          index: _currentIndex,
+          children: [
+            _buildMapScreen(),
+            ReservationsScreen(
+              token: widget.token ?? '',
+              role: widget.role ?? '',
+            ),
+            ConversationsScreen(
+              token: widget.token ?? '',
+              userId: widget.userId ?? '',
+              role: widget.role,
+            ),
+            NotificationsScreen(
+              token: widget.token ?? '',
+            ),
+            ProfileScreen(
+              token: widget.token ?? '',
+              role: widget.role ?? '',
+            ),
+          ],
+        ),
+        bottomNavigationBar: BottomNavigationBar(
+          type: BottomNavigationBarType.fixed,
+          selectedItemColor: marron,
+          unselectedItemColor: Colors.grey,
+          backgroundColor: Colors.white,
+          currentIndex: _currentIndex,
+          onTap: (index) {
+            setState(() {
+              _currentIndex = index;
+              if (index == 0) {
+                _newSalonsCount = 0;
+                fetchSalons();
+              }
+            });
+          },
+          items: [
+            BottomNavigationBarItem(
+              icon: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  const Icon(Icons.home),
+                  if (_newSalonsCount > 0)
+                    Positioned(
+                      right: -4,
+                      top: -4,
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: const BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Text(
+                          '$_newSalonsCount',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              label: 'Accueil',
+            ),
+            const BottomNavigationBarItem(
+              icon: Icon(Icons.calendar_today),
+              label: 'Réservations',
+            ),
+            BottomNavigationBarItem(
+              icon: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  const Icon(Icons.message),
+                  if (WebSocketService().unreadMessagesCount > 0)
+                    Positioned(
+                      right: -4,
+                      top: -4,
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: const BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Text(
+                          '${WebSocketService().unreadMessagesCount}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              label: 'Messages',
+            ),
+            BottomNavigationBarItem(
+              icon: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  const Icon(Icons.notifications),
+                  if (WebSocketService().unreadNotificationsCount > 0)
+                    Positioned(
+                      right: -4,
+                      top: -4,
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: const BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Text(
+                          '${WebSocketService().unreadNotificationsCount}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              label: 'Notifications',
+            ),
+            const BottomNavigationBarItem(
+              icon: Icon(Icons.person),
+              label: 'Profil',
+            ),
+          ],
+        ),
       ),
     );
   }
