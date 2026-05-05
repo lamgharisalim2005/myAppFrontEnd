@@ -654,6 +654,8 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             NotificationsScreen(
               token: widget.token ?? '',
+              role: widget.role ?? '',
+              userId: widget.userId ?? '',
             ),
             ProfileScreen(
               token: widget.token ?? '',

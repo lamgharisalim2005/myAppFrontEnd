@@ -3,20 +3,19 @@ import '../../services/api_service.dart';
 import 'dart:convert';
 import 'chat_screen.dart';
 import '../../services/websocket_service.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class ConversationsScreen extends StatefulWidget {
   final String token;
   final String userId;
-  final VoidCallback? onNotificationReceived; // ← ajouter
-  final String? role; // ← ajouter
+  final VoidCallback? onNotificationReceived;
+  final String? role;
 
   const ConversationsScreen({
     super.key,
     required this.token,
     required this.userId,
-    this.role, // ← ajouter
-    this.onNotificationReceived, // ← ajouter
+    this.role,
+    this.onNotificationReceived,
   });
 
   @override
@@ -32,8 +31,6 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
   Map<String, bool> onlineStatuses = {};
   bool _selectionMode = false;
   Set<String> _selectedConversations = {};
-
-
 
   @override
   void initState() {
@@ -52,15 +49,12 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     // Ecouter les nouveaux messages
     WebSocketService().messagesStream.listen((data) {
       if (mounted) {
-        // Si nouveau message → retirer la conversation des supprimées
-        _retirerConversationSupprimee(data['senderId']);
         _fetchConversations();
       }
     });
 
     WebSocketService().notificationsStream.listen((data) {
       if (mounted) {
-        // Notifier home_screen de mettre à jour le badge
         widget.onNotificationReceived?.call();
       }
     });
@@ -69,28 +63,6 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
   @override
   void dispose() {
     super.dispose();
-  }
-
-  Future<void> _retirerConversationSupprimee(String senderId) async {
-    final prefs = await SharedPreferences.getInstance();
-
-    // Retirer la conversation des supprimées
-    final deletedConversations = prefs.getStringList(
-        'deleted_conversations_${widget.token}') ?? [];
-    if (deletedConversations.contains(senderId)) {
-      deletedConversations.remove(senderId);
-      await prefs.setStringList(
-          'deleted_conversations_${widget.token}', deletedConversations);
-    }
-
-    // Retirer aussi le filtre des messages de cette conversation
-    final deletedMessages = prefs.getStringList(
-        'deleted_messages_${widget.token}') ?? [];
-    if (deletedMessages.contains('conv_$senderId')) {
-      deletedMessages.remove('conv_$senderId');
-      await prefs.setStringList(
-          'deleted_messages_${widget.token}', deletedMessages);
-    }
   }
 
   Future<void> _fetchOnlineStatuses() async {
@@ -114,40 +86,29 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     }
   }
 
+  // Nouvelle méthode — appelle l'API pour supprimer
   Future<void> _supprimerConversationsSelectionnees() async {
-    final prefs = await SharedPreferences.getInstance();
-
-    // Supprimer les conversations
-    final deletedConversations = prefs.getStringList('deleted_conversations_${widget.token}') ?? [];
-    deletedConversations.addAll(_selectedConversations);
-    await prefs.setStringList('deleted_conversations_${widget.token}', deletedConversations);
-
-    // Supprimer aussi tous les messages de ces conversations
-    final deletedMessages = prefs.getStringList('deleted_messages_${widget.token}') ?? [];
-    for (var userId in _selectedConversations) {
-      // Trouver tous les messages de cette conversation
-      final conversation = conversations.firstWhere(
-            (c) => c['userId'] == userId,
-        orElse: () => {},
-      );
-      if (conversation.isNotEmpty) {
-        // Ajouter l'ID de conversation dans les messages supprimés
-        // pour filtrer lors du chargement
-        deletedMessages.add('conv_$userId');
+    for (var partnerId in _selectedConversations) {
+      try {
+        await ApiService.delete(
+          'http://127.0.0.1:8080/api/messages/conversation/$partnerId',
+          widget.token,
+        );
+      } catch (e) {
+        debugPrint('Erreur suppression conversation: $e');
       }
     }
-    await prefs.setStringList('deleted_messages_${widget.token}', deletedMessages);
 
     setState(() {
-      conversations.removeWhere((c) => _selectedConversations.contains(c['userId']));
+      conversations.removeWhere(
+            (c) => _selectedConversations.contains(c['userId']),
+      );
       _selectedConversations.clear();
       _selectionMode = false;
     });
-  }
 
-  Future<List<String>> _getDeletedConversations() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getStringList('deleted_conversations_${widget.token}') ?? [];
+    // Recharger depuis le serveur pour être sûr
+    _fetchConversations();
   }
 
   Future<void> _ouvrirChat(Map<String, dynamic> conversation) async {
@@ -160,8 +121,8 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
           otherUserName: conversation['name'],
           otherUserType: conversation['userType'],
           otherProfilePicture: conversation['profilePicture'],
-          userId: widget.userId, // ← ajouter
-          role: widget.role,     // ← ajouter
+          userId: widget.userId,
+          role: widget.role,
         ),
       ),
     );
@@ -189,11 +150,8 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
               0, (sum, c) => sum + (c['unreadCount'] as int? ?? 0));
           WebSocketService().updateUnreadMessagesCount(totalUnread);
 
-          final deletedConversations = await _getDeletedConversations();
           setState(() {
-            conversations = list
-                .where((c) => !deletedConversations.contains(c['userId']))
-                .toList();
+            conversations = list;
             isLoading = false;
           });
           _fetchOnlineStatuses();
@@ -258,7 +216,6 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
           : AppBar(
         backgroundColor: marron,
         automaticallyImplyLeading: false,
-        iconTheme: const IconThemeData(color: Colors.white),
         title: const Text(
           'Messages',
           style: TextStyle(
@@ -409,7 +366,6 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                   )
                       : null,
                 ),
-                // Point statut en ligne
                 Positioned(
                   right: 0,
                   bottom: 0,
@@ -506,7 +462,6 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
               ),
             ),
             const SizedBox(width: 8),
-            // Badge messages non lus ou icône sélection
             if (isSelected)
               const Icon(Icons.check_circle, color: marron, size: 24)
             else if (unreadCount > 0)

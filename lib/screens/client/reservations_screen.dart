@@ -7,12 +7,14 @@ import 'package:flutter_stripe/flutter_stripe.dart';
 class ReservationsScreen extends StatefulWidget {
   final String token;
   final String role;
+  final int initialIndex;
 
 
   const ReservationsScreen({
     super.key,
     required this.token,
     required this.role,
+    this.initialIndex = 0,
   });
 
   @override
@@ -57,8 +59,13 @@ class _ReservationsScreenState extends State<ReservationsScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(
+      length: 3,
+      vsync: this,
+      initialIndex: widget.initialIndex, // ← ajouter
+    );
     _fetchReservations();
+
 
     // Recharger automatiquement quand une nouvelle réservation arrive
     WebSocketService().notificationsStream.listen((data) {
@@ -231,10 +238,10 @@ class _ReservationsScreenState extends State<ReservationsScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         backgroundColor: marron,
-        automaticallyImplyLeading: false,
+        automaticallyImplyLeading: true,
+        iconTheme: const IconThemeData(color: Colors.white),
         title: Text(
           widget.role == 'CLIENT' ? 'Mes Réservations' : 'Dashboard',
           style: const TextStyle(

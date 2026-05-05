@@ -2,11 +2,20 @@ import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
 import 'dart:convert';
 import '../../services/websocket_service.dart';
+import '../client/reservations_screen.dart';
+import '../coiffeur/demandes_salon_screen.dart';
 
 class NotificationsScreen extends StatefulWidget {
   final String token;
+  final String role;
+  final String userId;
 
-  const NotificationsScreen({super.key, required this.token});
+  const NotificationsScreen({
+    super.key,
+    required this.token,
+    required this.role,
+    required this.userId,
+  });
 
   @override
   State<NotificationsScreen> createState() => _NotificationsScreenState();
@@ -19,12 +28,15 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   bool isLoading = true;
   String? errorMessage;
 
+  // Pour naviguer vers demandes salon (admin)
+  String? _salonId;
+  String? _salonName;
+
   @override
   void initState() {
     super.initState();
     _fetchNotifications();
 
-    // Recharger automatiquement quand une nouvelle notification arrive
     WebSocketService().notificationsStream.listen((data) {
       if (mounted) {
         _fetchNotifications();
@@ -58,6 +70,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             });
             isLoading = false;
           });
+
+          // Si coiffeur → récupérer son salonId pour navigation
+          if (widget.role == 'COIFFEUR') {
+            await _fetchSalonId();
+          }
         }
       } else {
         setState(() {
@@ -70,6 +87,36 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         errorMessage = 'Impossible de se connecter au serveur';
         isLoading = false;
       });
+    }
+  }
+
+  // Récupérer le salonId du coiffeur admin
+  Future<void> _fetchSalonId() async {
+    try {
+      final profileResponse = await ApiService.get(
+        'http://127.0.0.1:8080/api/coiffeurs/profile',
+        widget.token,
+      );
+      final profileData = json.decode(profileResponse.body);
+      if (profileData['status'] == 'success') {
+        final coiffeurId = profileData['data']['userId'];
+        final detailResponse = await ApiService.get(
+          'http://127.0.0.1:8080/api/coiffeurs/$coiffeurId/detail',
+          widget.token,
+        );
+        final detailData = json.decode(detailResponse.body);
+        if (detailData['status'] == 'success') {
+          final salonData = detailData['data']['salon'];
+          if (salonData != null) {
+            setState(() {
+              _salonId = salonData['id'];
+              _salonName = salonData['name'];
+            });
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Erreur fetch salonId: $e');
     }
   }
 
@@ -86,7 +133,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         setState(() {
           notifications[index]['readStatus'] = true;
         });
-        // Mettre à jour le badge dans home_screen
         final newCount = notifications
             .where((n) => n['readStatus'] == false)
             .length;
@@ -94,6 +140,55 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       }
     } catch (e) {
       debugPrint('Erreur: $e');
+    }
+  }
+
+  // Navigation selon eventType
+  void _naviguerVersEvenement(
+      Map<String, dynamic> notification, int index) async {
+    // Marquer comme lue d'abord
+    await _markAsRead(notification['id'], index);
+
+    if (!mounted) return;
+
+    final eventType = notification['eventType'];
+
+    switch (eventType) {
+      case 'RESERVATION':
+      case 'PAYMENT':
+      // Client ET Coiffeur → page Réservations
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ReservationsScreen(
+              token: widget.token,
+              role: widget.role,
+            ),
+          ),
+        );
+        break;
+
+      case 'SALON_REQUEST':
+      // Coiffeur Admin → page Demandes reçues
+        if (widget.role == 'COIFFEUR' &&
+            _salonId != null &&
+            _salonName != null) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => DemandesSalonScreen(
+                token: widget.token,
+                salonId: _salonId!,
+                salonName: _salonName!,
+              ),
+            ),
+          );
+        }
+        break;
+
+      default:
+      // Pas de navigation spéciale
+        break;
     }
   }
 
@@ -105,6 +200,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         return Icons.group;
       case 'SALON':
         return Icons.content_cut;
+      case 'PAYMENT':
+        return Icons.payment;
       default:
         return Icons.notifications;
     }
@@ -118,6 +215,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         return Colors.green;
       case 'SALON':
         return marron;
+      case 'PAYMENT':
+        return Colors.purple;
       default:
         return Colors.grey;
     }
@@ -157,7 +256,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             if (unreadCount > 0) ...[
               const SizedBox(width: 8),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 3,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.red,
                   borderRadius: BorderRadius.circular(12),
@@ -229,7 +331,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.notifications_none, size: 80, color: Colors.grey.shade300),
+          Icon(
+            Icons.notifications_none,
+            size: 80,
+            color: Colors.grey.shade300,
+          ),
           const SizedBox(height: 16),
           const Text(
             'Aucune notification',
@@ -263,14 +369,22 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     );
   }
 
-  Widget _buildNotificationCard(Map<String, dynamic> notification, int index) {
+  Widget _buildNotificationCard(
+      Map<String, dynamic> notification, int index) {
     final isRead = notification['readStatus'] == true;
     final eventType = notification['eventType'];
     final icon = _getIcon(eventType);
     final color = _getColor(eventType);
 
+    // Vérifier si la notification est navigable
+    final bool isNavigable = eventType == 'RESERVATION' ||
+        eventType == 'PAYMENT' ||
+        (eventType == 'SALON_REQUEST' &&
+            widget.role == 'COIFFEUR' &&
+            _salonId != null);
+
     return GestureDetector(
-      onTap: () => _markAsRead(notification['id'], index),
+      onTap: () => _naviguerVersEvenement(notification, index),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 300),
         margin: const EdgeInsets.only(bottom: 12),
@@ -347,12 +461,37 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 8),
-                    Text(
-                      _getTimeAgo(notification['createdAt']),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade400,
-                      ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          _getTimeAgo(notification['createdAt']),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade400,
+                          ),
+                        ),
+                        // Indicateur navigable
+                        if (isNavigable)
+                          Row(
+                            children: [
+                              Text(
+                                'Voir détails',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: color,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Icon(
+                                Icons.arrow_forward_ios,
+                                size: 12,
+                                color: color,
+                              ),
+                            ],
+                          ),
+                      ],
                     ),
                   ],
                 ),

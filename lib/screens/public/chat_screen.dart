@@ -4,7 +4,6 @@ import '../../services/websocket_service.dart';
 import 'dart:convert';
 import 'dart:async';
 import 'public_profile_screen.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class ChatScreen extends StatefulWidget {
   final String token;
@@ -12,8 +11,8 @@ class ChatScreen extends StatefulWidget {
   final String otherUserName;
   final String otherUserType;
   final String? otherProfilePicture;
-  final String? userId;    // ← ajouter
-  final String? role;      // ← ajouter
+  final String? userId;
+  final String? role;
 
   const ChatScreen({
     super.key,
@@ -22,14 +21,13 @@ class ChatScreen extends StatefulWidget {
     required this.otherUserName,
     required this.otherUserType,
     this.otherProfilePicture,
-    this.userId,    // ← ajouter
-    this.role,      // ← ajouter
+    this.userId,
+    this.role,
   });
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
 }
-
 
 class _ChatScreenState extends State<ChatScreen> {
   bool _isOtherOnline = false;
@@ -41,9 +39,8 @@ class _ChatScreenState extends State<ChatScreen> {
   String? errorMessage;
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  StreamSubscription? _messageSubscription; // ← ici
-  bool _isBlocked = false; // j'ai bloqué l'autre
-  bool _isBlockedByOther = false; // l'autre m'a bloqué
+  StreamSubscription? _messageSubscription;
+  bool _isBlocked = false;
   bool _selectionMode = false;
   Set<String> _selectedMessages = {};
 
@@ -83,7 +80,6 @@ class _ChatScreenState extends State<ChatScreen> {
     _checkOnlineStatus();
     _checkBlockStatus();
 
-    // Ecouter le statut en ligne en temps réel
     WebSocketService().onlineStatusStream.listen((data) {
       if (mounted) {
         if (data['userId'].toString() == widget.otherUserId.toString()) {
@@ -91,18 +87,16 @@ class _ChatScreenState extends State<ChatScreen> {
             _isOtherOnline = data['online'] == true;
           });
         }
-        // Recheck toujours via API pour être sûr
         _checkOnlineStatus();
       }
     });
 
     _messageSubscription = WebSocketService().messagesStream.listen((data) {
       if (mounted) {
-        // Vérifier si c'est une mise à jour de statut d'un message existant
-        final existingIndex = messages.indexWhere((m) => m['id'] == data['id']);
+        final existingIndex =
+        messages.indexWhere((m) => m['id'] == data['id']);
 
         if (existingIndex != -1) {
-          // Mettre à jour le statut du message existant
           setState(() {
             messages[existingIndex] = {
               ...messages[existingIndex],
@@ -110,7 +104,6 @@ class _ChatScreenState extends State<ChatScreen> {
             };
           });
         } else if (data['senderId'] == widget.otherUserId) {
-          // Nouveau message de l'autre personne
           setState(() {
             messages.add(data);
           });
@@ -128,14 +121,13 @@ class _ChatScreenState extends State<ChatScreen> {
     _scrollController.dispose();
     super.dispose();
   }
+
   Future<void> _checkOnlineStatus() async {
     try {
       final response = await ApiService.get(
         'http://127.0.0.1:8080/api/messages/online/${widget.otherUserId}',
         widget.token,
       );
-      debugPrint('🔍 otherUserId: ${widget.otherUserId}'); // ← ajouter
-      debugPrint('🔍 Online response: ${response.body}'); // ← ajouter
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         setState(() {
@@ -145,21 +137,6 @@ class _ChatScreenState extends State<ChatScreen> {
     } catch (e) {
       debugPrint('Erreur check online: $e');
     }
-  }
-
-  Future<void> _supprimerMessage(String messageId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final deletedMessages = prefs.getStringList('deleted_messages_${widget.token}') ?? [];
-    deletedMessages.add(messageId);
-    await prefs.setStringList('deleted_messages_${widget.token}', deletedMessages);
-    setState(() {
-      messages.removeWhere((m) => m['id'] == messageId);
-    });
-  }
-
-  Future<List<String>> _getDeletedMessages() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getStringList('deleted_messages_${widget.token}') ?? [];
   }
 
   Future<void> _checkBlockStatus() async {
@@ -211,6 +188,25 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Future<void> _supprimerMessagesSelectionnes() async {
+    for (var messageId in _selectedMessages) {
+      try {
+        await ApiService.delete(
+          'http://127.0.0.1:8080/api/messages/$messageId',
+          widget.token,
+        );
+      } catch (e) {
+        debugPrint('Erreur suppression message: $e');
+      }
+    }
+
+    setState(() {
+      messages.removeWhere((m) => _selectedMessages.contains(m['id']));
+      _selectedMessages.clear();
+      _selectionMode = false;
+    });
+  }
+
   Future<void> _fetchMessages() async {
     try {
       setState(() {
@@ -226,12 +222,8 @@ class _ChatScreenState extends State<ChatScreen> {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data['status'] == 'success') {
-          final deletedMessages = await _getDeletedMessages();
           setState(() {
-            messages = List<Map<String, dynamic>>.from(data['data'])
-                .where((m) => !deletedMessages.contains(m['id'])
-                && !deletedMessages.contains('conv_${widget.otherUserId}'))
-                .toList();
+            messages = List<Map<String, dynamic>>.from(data['data']);
             isLoading = false;
           });
           _scrollToBottom();
@@ -268,18 +260,6 @@ class _ChatScreenState extends State<ChatScreen> {
         await _markAsRead(message['id']);
       }
     }
-  }
-
-  Future<void> _supprimerMessagesSelectionnes() async {
-    final prefs = await SharedPreferences.getInstance();
-    final deletedMessages = prefs.getStringList('deleted_messages_${widget.token}') ?? [];
-    deletedMessages.addAll(_selectedMessages);
-    await prefs.setStringList('deleted_messages_${widget.token}', deletedMessages);
-    setState(() {
-      messages.removeWhere((m) => _selectedMessages.contains(m['id']));
-      _selectedMessages.clear();
-      _selectionMode = false;
-    });
   }
 
   Future<void> _sendMessage() async {
@@ -365,7 +345,10 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         title: Text(
           '${_selectedMessages.length} sélectionné(s)',
-          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         actions: [
           IconButton(
@@ -386,8 +369,8 @@ class _ChatScreenState extends State<ChatScreen> {
                   userId: widget.otherUserId,
                   userType: widget.otherUserType,
                   token: widget.token,
-                  currentUserId: widget.userId, // ← ajouter
-                  currentUserRole: widget.role, // ← ajouter
+                  currentUserId: widget.userId,
+                  currentUserRole: widget.role,
                 ),
               ),
             );
@@ -455,9 +438,7 @@ class _ChatScreenState extends State<ChatScreen> {
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert, color: Colors.white),
             onSelected: (value) {
-              if (value == 'block') {
-                _confirmerBlock();
-              }
+              if (value == 'block') _confirmerBlock();
             },
             itemBuilder: (context) => [
               PopupMenuItem(
@@ -542,7 +523,6 @@ class _ChatScreenState extends State<ChatScreen> {
             itemBuilder: (context, index) {
               final message = messages[index];
               final isMe = message['isMe'] == true;
-
               final showDate = index == 0 ||
                   _formatDate(messages[index - 1]['createdAt']) !=
                       _formatDate(message['createdAt']);
@@ -631,7 +611,8 @@ class _ChatScreenState extends State<ChatScreen> {
               ],
               Flexible(
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
                     color: isSelected
                         ? marron.withOpacity(0.6)
@@ -652,8 +633,9 @@ class _ChatScreenState extends State<ChatScreen> {
                     ],
                   ),
                   child: Column(
-                    crossAxisAlignment:
-                    isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                    crossAxisAlignment: isMe
+                        ? CrossAxisAlignment.end
+                        : CrossAxisAlignment.start,
                     children: [
                       Text(
                         message['content'] ?? '',

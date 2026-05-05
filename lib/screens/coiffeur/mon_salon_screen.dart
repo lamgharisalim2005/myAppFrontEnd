@@ -3,6 +3,9 @@ import '../../services/api_service.dart';
 import 'dart:convert';
 import 'package:geolocator/geolocator.dart';
 import 'photos_salon_screen.dart';
+import 'demandes_salon_screen.dart';
+import 'mes_demandes_screen.dart';
+
 class MonSalonScreen extends StatefulWidget {
   final String token;
 
@@ -21,7 +24,6 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
   Map<String, dynamic>? salon;
   List<dynamic> membres = [];
   List<dynamic> demandes = [];
-  List<dynamic> mesDemandes = [];
   bool isLoading = true;
   bool isAdmin = false;
   String? errorMessage;
@@ -39,41 +41,39 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
       errorMessage = null;
     });
     try {
-      // Récupérer le profil coiffeur
       final profileResponse = await ApiService.get(
         'http://127.0.0.1:8080/api/coiffeurs/profile',
         widget.token,
       );
 
       final profileData = json.decode(profileResponse.body);
-      if (profileResponse.statusCode == 200 && profileData['status'] == 'success') {
+      if (profileResponse.statusCode == 200 &&
+          profileData['status'] == 'success') {
         coiffeurId = profileData['data']['userId'];
 
-        // Récupérer les détails du coiffeur (pour voir s'il a un salon)
         final detailResponse = await ApiService.get(
           'http://127.0.0.1:8080/api/coiffeurs/$coiffeurId/detail',
           widget.token,
         );
 
         final detailData = json.decode(detailResponse.body);
-        if (detailResponse.statusCode == 200 && detailData['status'] == 'success') {
+        if (detailResponse.statusCode == 200 &&
+            detailData['status'] == 'success') {
           final salonData = detailData['data']['salon'];
 
           if (salonData != null) {
-            // Le coiffeur a un salon
             final salonId = salonData['id'];
 
-            // Récupérer les détails complets du salon
             final salonResponse = await ApiService.get(
               'http://127.0.0.1:8080/api/salons/$salonId/detail',
               widget.token,
             );
             final salonDetailData = json.decode(salonResponse.body);
-            if (salonResponse.statusCode == 200 && salonDetailData['status'] == 'success') {
+            if (salonResponse.statusCode == 200 &&
+                salonDetailData['status'] == 'success') {
               final salonDetail = salonDetailData['data'];
               final coiffeurs = salonDetail['coiffeurs'] as List? ?? [];
 
-              // Vérifier si ce coiffeur est admin
               final monProfil = coiffeurs.firstWhere(
                     (c) => c['coiffeurId'] == coiffeurId,
                 orElse: () => null,
@@ -82,18 +82,16 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
               setState(() {
                 salon = salonDetail;
                 membres = coiffeurs;
-                isAdmin = monProfil != null && monProfil['isAdmin'] == true;
+                isAdmin =
+                    monProfil != null && monProfil['isAdmin'] == true;
                 isLoading = false;
               });
 
-              // Si admin, charger les demandes
               if (isAdmin) {
                 await _fetchDemandes(salonId);
               }
             }
           } else {
-            // Pas de salon — charger les demandes envoyées
-            await _fetchMesDemandes();
             setState(() => isLoading = false);
           }
         }
@@ -126,25 +124,8 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
     }
   }
 
-  Future<void> _fetchMesDemandes() async {
-    try {
-      final response = await ApiService.get(
-        'http://127.0.0.1:8080/api/salon-requests/coiffeur',
-        widget.token,
-      );
-
-      final data = json.decode(response.body);
-      if (response.statusCode == 200 && data['status'] == 'success') {
-        setState(() {
-          mesDemandes = data['data'] as List? ?? [];
-        });
-      }
-    } catch (e) {
-      debugPrint('Erreur fetch mes demandes: $e');
-    }
-  }
-
-  Future<void> _creerSalon(String name, String localisation, double lat, double lng) async {
+  Future<void> _creerSalon(
+      String name, String localisation, double lat, double lng) async {
     try {
       final response = await ApiService.post(
         'http://127.0.0.1:8080/api/salons',
@@ -173,31 +154,6 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
     }
   }
 
-  Future<void> _traiterDemande(String demandeId, String status) async {
-    try {
-      final response = await ApiService.put(
-        'http://127.0.0.1:8080/api/salon-requests/$demandeId?status=$status',
-        widget.token,
-      );
-
-      if (response.statusCode == 200) {
-        _fetchData();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(status == 'ACCEPTED'
-                  ? '✅ Demande acceptée'
-                  : '❌ Demande refusée'),
-              backgroundColor: status == 'ACCEPTED' ? vert : rouge,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      debugPrint('Erreur traitement demande: $e');
-    }
-  }
-
   Future<void> _retirerMembre(String membreId) async {
     try {
       final response = await ApiService.put(
@@ -222,6 +178,42 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
     }
   }
 
+  Future<void> _transfererAdmin(String nouveauAdminId) async {
+    debugPrint('🔍 nouveauAdminId envoyé: $nouveauAdminId');
+    try {
+      final response = await ApiService.put(
+        'http://127.0.0.1:8080/api/salons/${salon!['id']}/transferer',
+        widget.token,
+        body: json.encode({'nouveauAdminId': nouveauAdminId}),
+      );
+
+      if (response.statusCode == 200) {
+        _fetchData();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✅ Administration transférée avec succès'),
+              backgroundColor: vert,
+            ),
+          );
+        }
+      } else {
+        final data = json.decode(response.body);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                  '❌ ${data['errors']?[0]?['message'] ?? 'Erreur'}'),
+              backgroundColor: rouge,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Erreur transfert admin: $e');
+    }
+  }
+
   Future<void> _quitterSalon() async {
     try {
       final response = await ApiService.put(
@@ -230,7 +222,6 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
       );
 
       if (response.statusCode == 200) {
-        _fetchData();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -238,6 +229,7 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
               backgroundColor: marron,
             ),
           );
+          Navigator.pop(context);
         }
       }
     } catch (e) {
@@ -269,8 +261,180 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
     }
   }
 
+  void _showTransfertDialog() {
+    final autresMembres = membres
+        .where(
+            (m) => m['coiffeurId'] != coiffeurId && m['isAdmin'] != true)
+        .toList();
+
+    if (autresMembres.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content:
+          Text('❌ Aucun membre disponible pour le transfert'),
+          backgroundColor: rouge,
+        ),
+      );
+      return;
+    }
+
+    String? selectedMembreId;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setStateDialog) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: const Row(
+            children: [
+              Icon(Icons.admin_panel_settings, color: marron),
+              SizedBox(width: 8),
+              Text(
+                'Transférer l\'admin',
+                style: TextStyle(
+                  color: marron,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Choisissez le nouveau administrateur du salon :',
+                style: TextStyle(color: Colors.grey, fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              ...autresMembres.map((membre) {
+                final isSelected =
+                    selectedMembreId == membre['coiffeurId'];
+                return GestureDetector(
+                  onTap: () {
+                    setStateDialog(() {
+                      selectedMembreId = membre['coiffeurId'];
+                    });
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? marron.withOpacity(0.1)
+                          : Colors.grey.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color:
+                        isSelected ? marron : Colors.transparent,
+                        width: 2,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 20,
+                          backgroundColor: marron.withOpacity(0.1),
+                          backgroundImage:
+                          membre['profilePicture'] != null
+                              ? NetworkImage(
+                              membre['profilePicture'])
+                              : null,
+                          child: membre['profilePicture'] == null
+                              ? const Icon(Icons.person,
+                              color: marron, size: 20)
+                              : null,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            membre['name'] ?? '',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: isSelected
+                                  ? marron
+                                  : Colors.black87,
+                            ),
+                          ),
+                        ),
+                        if (isSelected)
+                          const Icon(Icons.check_circle,
+                              color: marron),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Annuler'),
+            ),
+            ElevatedButton(
+              onPressed: selectedMembreId == null
+                  ? null
+                  : () {
+                debugPrint('🔍 selectedMembreId: $selectedMembreId');
+                Navigator.pop(ctx);
+                _confirmerTransfert(selectedMembreId!);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: marron,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text('Transférer'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _confirmerTransfert(String nouveauAdminId) {
+    final membre = membres.firstWhere(
+          (m) => m['coiffeurId'] == nouveauAdminId,
+      orElse: () => {},
+    );
+    final nom = membre['name'] ?? 'ce membre';
+
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Confirmer le transfert'),
+        content: Text(
+          'Êtes-vous sûr de vouloir transférer l\'administration à $nom ?\n\nVous deviendrez un membre simple.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Non'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _transfererAdmin(nouveauAdminId);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: marron,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Oui, transférer'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showCreerSalonDialog() async {
-    // Montrer un loading pendant la récupération GPS
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -284,7 +448,8 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
     Position? position;
     try {
       position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+        locationSettings:
+        const LocationSettings(accuracy: LocationAccuracy.high),
       );
     } catch (e) {
       debugPrint('Erreur GPS: $e');
@@ -296,12 +461,23 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
     final localisationController = TextEditingController();
 
     showDialog(
-      // ... reste du code dialog exactement comme avant
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text(
-          'Créer un salon',
-          style: TextStyle(color: marron, fontWeight: FontWeight.bold),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.store, color: marron),
+            SizedBox(width: 8),
+            Text(
+              'Créer un salon',
+              style: TextStyle(
+                color: marron,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -311,7 +487,9 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
               decoration: InputDecoration(
                 labelText: 'Nom du salon',
                 labelStyle: const TextStyle(color: marron),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: const BorderSide(color: marron),
@@ -324,15 +502,17 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
               decoration: InputDecoration(
                 labelText: 'Adresse',
                 labelStyle: const TextStyle(color: marron),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: const BorderSide(color: marron),
                 ),
               ),
             ),
-            if (position != null) ...[
-              const SizedBox(height: 12),
+            const SizedBox(height: 12),
+            if (position != null)
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -342,19 +522,20 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.location_on, color: vert, size: 16),
+                    const Icon(Icons.location_on,
+                        color: vert, size: 16),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'Position GPS détectée ✅\n${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}',
-                        style: const TextStyle(color: vert, fontSize: 12),
+                        style: const TextStyle(
+                            color: vert, fontSize: 12),
                       ),
                     ),
                   ],
                 ),
-              ),
-            ] else ...[
-              const SizedBox(height: 12),
+              )
+            else
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -366,13 +547,12 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
                     Icon(Icons.location_off, color: rouge, size: 16),
                     SizedBox(width: 8),
                     Text(
-                      'GPS non disponible — position par défaut',
+                      'GPS non disponible',
                       style: TextStyle(color: rouge, fontSize: 12),
                     ),
                   ],
                 ),
               ),
-            ],
           ],
         ),
         actions: [
@@ -381,14 +561,18 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
             child: const Text('Annuler'),
           ),
           ElevatedButton(
-            onPressed: position == null ? null : () {
+            onPressed: position == null
+                ? null
+                : () {
               final name = nameController.text.trim();
-              final localisation = localisationController.text.trim();
+              final localisation =
+              localisationController.text.trim();
 
               if (name.isEmpty || localisation.isEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content: Text('❌ Remplissez tous les champs'),
+                    content:
+                    Text('❌ Remplissez tous les champs'),
                     backgroundColor: rouge,
                   ),
                 );
@@ -406,6 +590,9 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
             style: ElevatedButton.styleFrom(
               backgroundColor: position == null ? Colors.grey : marron,
               foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
             child: const Text('Créer'),
           ),
@@ -423,7 +610,10 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
         iconTheme: const IconThemeData(color: Colors.white),
         title: const Text(
           'Mon Salon',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         elevation: 0,
       ),
@@ -468,11 +658,9 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
     );
   }
 
-  // Pas de salon
   Widget _buildPasDeSalon() {
     return Column(
       children: [
-        // Créer un salon
         Container(
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
@@ -543,137 +731,62 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
           ),
         ),
 
-        // Mes demandes envoyées
-        if (mesDemandes.isNotEmpty) ...[
-          const SizedBox(height: 24),
-          _buildMesDemandes(),
-        ],
+        const SizedBox(height: 16),
+
+        _buildSectionButton(
+          icon: Icons.send,
+          title: 'Mes Demandes',
+          subtitle: 'Voir vos demandes envoyées aux salons',
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => MesDemandesScreen(token: widget.token),
+              ),
+            );
+          },
+        ),
       ],
     );
   }
 
-  Widget _buildMesDemandes() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 8,
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Mes demandes envoyées',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: marron,
-            ),
-          ),
-          const SizedBox(height: 12),
-          ...mesDemandes.map((demande) => _buildDemandeEnvoyeeCard(demande)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDemandeEnvoyeeCard(dynamic demande) {
-    Color statusColor;
-    String statusLabel;
-    IconData statusIcon;
-
-    switch (demande['status']) {
-      case 'PENDING':
-        statusColor = orange;
-        statusLabel = 'En attente';
-        statusIcon = Icons.hourglass_empty;
-        break;
-      case 'ACCEPTED':
-        statusColor = vert;
-        statusLabel = 'Acceptée';
-        statusIcon = Icons.check_circle;
-        break;
-      case 'REJECTED':
-        statusColor = rouge;
-        statusLabel = 'Refusée';
-        statusIcon = Icons.cancel;
-        break;
-      default:
-        statusColor = Colors.grey;
-        statusLabel = demande['status'];
-        statusIcon = Icons.info;
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: statusColor.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: statusColor.withOpacity(0.3)),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.store, color: marron),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              demande['salonName'] ?? '',
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Colors.black87,
-              ),
-            ),
-          ),
-          Row(
-            children: [
-              Icon(statusIcon, color: statusColor, size: 16),
-              const SizedBox(width: 4),
-              Text(
-                statusLabel,
-                style: TextStyle(
-                  color: statusColor,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 13,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  // A un salon
   Widget _buildSalon() {
     return Column(
       children: [
-        // Infos salon
         _buildSalonInfo(),
         const SizedBox(height: 16),
 
-        // Membres
-        _buildMembres(),
-        const SizedBox(height: 16),
-
-        // Demandes (admin seulement)
-        if (isAdmin && demandes.isNotEmpty) ...[
-          _buildDemandes(),
+        if (isAdmin) ...[
+          _buildSectionButton(
+            icon: Icons.people,
+            title: 'Demandes reçues',
+            subtitle: demandes.isNotEmpty
+                ? '${demandes.length} demande(s) en attente'
+                : 'Aucune demande en attente',
+            badge: demandes.isNotEmpty ? demandes.length : null,
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => DemandesSalonScreen(
+                    token: widget.token,
+                    salonId: salon!['id'],
+                    salonName: salon!['name'],
+                  ),
+                ),
+              ).then((_) => _fetchData());
+            },
+          ),
           const SizedBox(height: 16),
         ],
 
-        // Actions
-        if (isAdmin) ...[
-          _buildAdminActions(),
-        ] else ...[
+        _buildMembres(),
+        const SizedBox(height: 16),
+
+        if (isAdmin)
+          _buildAdminActions()
+        else
           _buildMembreActions(),
-        ],
 
         const SizedBox(height: 32),
       ],
@@ -720,7 +833,8 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    const Icon(Icons.location_on, color: Colors.grey, size: 16),
+                    const Icon(Icons.location_on,
+                        color: Colors.grey, size: 16),
                     const SizedBox(width: 4),
                     Expanded(
                       child: Text(
@@ -735,7 +849,10 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
           ),
           if (isAdmin)
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 8,
+                vertical: 4,
+              ),
               decoration: BoxDecoration(
                 color: marron,
                 borderRadius: BorderRadius.circular(8),
@@ -783,7 +900,8 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
               ),
               Text(
                 '${membres.length} membre(s)',
-                style: const TextStyle(color: Colors.grey, fontSize: 13),
+                style:
+                const TextStyle(color: Colors.grey, fontSize: 13),
               ),
             ],
           ),
@@ -838,7 +956,10 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
                       const SizedBox(width: 8),
                       const Text(
                         '(Moi)',
-                        style: TextStyle(color: Colors.grey, fontSize: 12),
+                        style: TextStyle(
+                          color: Colors.grey,
+                          fontSize: 12,
+                        ),
                       ),
                     ],
                   ],
@@ -851,101 +972,12 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
               ],
             ),
           ),
-          // Bouton retirer (admin seulement, pas pour soi-même)
           if (isAdmin && !isMe && !membreIsAdmin)
             IconButton(
-              onPressed: () => _confirmerRetrait(membre['coiffeurId'], membre['name']),
+              onPressed: () =>
+                  _confirmerRetrait(membre['coiffeurId'], membre['name']),
               icon: const Icon(Icons.remove_circle_outline, color: rouge),
             ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDemandes() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 8,
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Text(
-                'Demandes en attente',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: marron,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.all(4),
-                decoration: const BoxDecoration(
-                  color: Colors.red,
-                  shape: BoxShape.circle,
-                ),
-                child: Text(
-                  '${demandes.length}',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          ...demandes.map((demande) => _buildDemandeCard(demande)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDemandeCard(dynamic demande) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade50,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.person_add, color: marron),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              demande['coiffeurName'] ?? '',
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Colors.black87,
-              ),
-            ),
-          ),
-          Row(
-            children: [
-              IconButton(
-                onPressed: () => _traiterDemande(demande['id'], 'ACCEPTED'),
-                icon: const Icon(Icons.check_circle, color: vert),
-              ),
-              IconButton(
-                onPressed: () => _traiterDemande(demande['id'], 'REJECTED'),
-                icon: const Icon(Icons.cancel, color: rouge),
-              ),
-            ],
-          ),
         ],
       ),
     );
@@ -977,8 +1009,7 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
           ),
           const SizedBox(height: 12),
 
-          // Photos du salon
-          _buildAdminButton(
+          _buildSectionButton(
             icon: Icons.photo_library,
             title: 'Photos du salon',
             subtitle: 'Gérer les photos du salon',
@@ -994,9 +1025,19 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
               );
             },
           ),
+
           const SizedBox(height: 12),
 
-          // Supprimer le salon
+          // ✅ Bouton transfert admin
+          _buildSectionButton(
+            icon: Icons.admin_panel_settings,
+            title: 'Transférer l\'administration',
+            subtitle: 'Passer le rôle admin à un autre membre',
+            onTap: () => _showTransfertDialog(),
+          ),
+
+          const SizedBox(height: 12),
+
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
@@ -1020,19 +1061,47 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
     );
   }
 
-  Widget _buildAdminButton({
+  Widget _buildMembreActions() {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: () => _confirmerQuitter(),
+        icon: const Icon(Icons.exit_to_app, color: rouge),
+        label: const Text(
+          'Quitter le salon',
+          style: TextStyle(color: rouge),
+        ),
+        style: OutlinedButton.styleFrom(
+          side: const BorderSide(color: rouge),
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSectionButton({
     required IconData icon,
     required String title,
     required String subtitle,
     required VoidCallback onTap,
+    int? badge,
   }) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: const Color(0xFFF5F5F5),
-          borderRadius: BorderRadius.circular(12),
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 8,
+            ),
+          ],
         ),
         child: Row(
           children: [
@@ -1068,29 +1137,29 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
                 ],
               ),
             ),
-            const Icon(Icons.arrow_forward_ios, color: Colors.grey, size: 16),
+            if (badge != null && badge > 0)
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: const BoxDecoration(
+                  color: Colors.red,
+                  shape: BoxShape.circle,
+                ),
+                child: Text(
+                  '$badge',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              )
+            else
+              const Icon(
+                Icons.arrow_forward_ios,
+                color: Colors.grey,
+                size: 16,
+              ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMembreActions() {
-    return SizedBox(
-      width: double.infinity,
-      child: OutlinedButton.icon(
-        onPressed: () => _confirmerQuitter(),
-        icon: const Icon(Icons.exit_to_app, color: rouge),
-        label: const Text(
-          'Quitter le salon',
-          style: TextStyle(color: rouge),
-        ),
-        style: OutlinedButton.styleFrom(
-          side: const BorderSide(color: rouge),
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
         ),
       ),
     );
@@ -1101,7 +1170,8 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Retirer le membre'),
-        content: Text('Êtes-vous sûr de vouloir retirer $name du salon ?'),
+        content: Text(
+            'Êtes-vous sûr de vouloir retirer $name du salon ?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -1128,7 +1198,8 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Quitter le salon'),
-        content: const Text('Êtes-vous sûr de vouloir quitter ce salon ?'),
+        content: const Text(
+            'Êtes-vous sûr de vouloir quitter ce salon ?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
