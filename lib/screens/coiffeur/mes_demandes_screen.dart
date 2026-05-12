@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
 import 'dart:convert';
+import '../../config/app_config.dart';
 
 class MesDemandesScreen extends StatefulWidget {
   final String token;
@@ -37,23 +38,32 @@ class _MesDemandesScreenState extends State<MesDemandesScreen> {
     });
     try {
       final response = await ApiService.get(
-        'http://127.0.0.1:8080/api/salon-requests/coiffeur',
+        '${AppConfig.baseUrl}/api/salon-requests/coiffeur',
         widget.token,
       );
+
+      debugPrint('🔍 MesDemandes status: ${response.statusCode}');
+      debugPrint('🔍 MesDemandes body: ${response.body}');
 
       final data = json.decode(response.body);
       if (response.statusCode == 200 && data['status'] == 'success') {
         setState(() {
           demandes = data['data'] as List? ?? [];
+          demandes.sort((a, b) {
+            final aDate = a['createdAt'] ?? '2000-01-01T00:00:00';
+            final bDate = b['createdAt'] ?? '2000-01-01T00:00:00';
+            return DateTime.parse(bDate).compareTo(DateTime.parse(aDate));
+          });
           isLoading = false;
         });
       } else {
         setState(() {
-          errorMessage = 'Erreur serveur';
+          errorMessage = data['errors']?[0]?['message'] ?? 'Erreur serveur';
           isLoading = false;
         });
       }
     } catch (e) {
+      debugPrint('❌ Erreur MesDemandes: $e');
       setState(() {
         errorMessage = 'Impossible de se connecter au serveur';
         isLoading = false;
@@ -61,12 +71,80 @@ class _MesDemandesScreenState extends State<MesDemandesScreen> {
     }
   }
 
+  Future<void> _annulerDemande(String demandeId) async {
+    try {
+      final response = await ApiService.delete(
+        '${AppConfig.baseUrl}/api/salon-requests/$demandeId',
+        widget.token,
+      );
+
+      if (response.statusCode == 200) {
+        _fetchDemandes();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✅ Demande annulée'),
+              backgroundColor: marron,
+            ),
+          );
+        }
+      } else {
+        final data = json.decode(response.body);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('❌ ${data['errors']?[0]?['message'] ?? 'Erreur'}'),
+              backgroundColor: rouge,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Erreur annulation: $e');
+    }
+  }
+
+  void _confirmerAnnulation(String demandeId, String salonName) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.cancel_outlined, color: rouge),
+            SizedBox(width: 8),
+            Text('Annuler la demande',
+                style: TextStyle(color: rouge, fontWeight: FontWeight.bold, fontSize: 16)),
+          ],
+        ),
+        content: Text('Voulez-vous annuler votre demande pour le salon $salonName ?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Non'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _annulerDemande(demandeId);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: rouge,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            child: const Text('Oui, annuler'),
+          ),
+        ],
+      ),
+    );
+  }
+
   String _getTimeAgo(String? createdAt) {
     if (createdAt == null) return '';
     final now = DateTime.now();
     final date = DateTime.parse(createdAt);
     final diff = now.difference(date);
-
     if (diff.inMinutes < 1) return 'À l\'instant';
     if (diff.inMinutes < 60) return 'Il y a ${diff.inMinutes} min';
     if (diff.inHours < 24) return 'Il y a ${diff.inHours} h';
@@ -76,40 +154,28 @@ class _MesDemandesScreenState extends State<MesDemandesScreen> {
 
   Color _getStatusColor(String status) {
     switch (status) {
-      case 'PENDING':
-        return orange;
-      case 'ACCEPTED':
-        return vert;
-      case 'REJECTED':
-        return rouge;
-      default:
-        return Colors.grey;
+      case 'PENDING': return orange;
+      case 'ACCEPTED': return vert;
+      case 'REJECTED': return rouge;
+      default: return Colors.grey;
     }
   }
 
   IconData _getStatusIcon(String status) {
     switch (status) {
-      case 'PENDING':
-        return Icons.hourglass_empty;
-      case 'ACCEPTED':
-        return Icons.check_circle;
-      case 'REJECTED':
-        return Icons.cancel;
-      default:
-        return Icons.info;
+      case 'PENDING': return Icons.hourglass_empty;
+      case 'ACCEPTED': return Icons.check_circle;
+      case 'REJECTED': return Icons.cancel;
+      default: return Icons.info;
     }
   }
 
   String _getStatusLabel(String status) {
     switch (status) {
-      case 'PENDING':
-        return 'En attente';
-      case 'ACCEPTED':
-        return 'Acceptée';
-      case 'REJECTED':
-        return 'Refusée';
-      default:
-        return status;
+      case 'PENDING': return 'En attente';
+      case 'ACCEPTED': return 'Acceptée';
+      case 'REJECTED': return 'Refusée';
+      default: return status;
     }
   }
 
@@ -122,10 +188,7 @@ class _MesDemandesScreenState extends State<MesDemandesScreen> {
         iconTheme: const IconThemeData(color: Colors.white),
         title: const Text(
           'Mes Demandes',
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         elevation: 0,
       ),
@@ -136,9 +199,7 @@ class _MesDemandesScreenState extends State<MesDemandesScreen> {
           : RefreshIndicator(
         color: marron,
         onRefresh: _fetchDemandes,
-        child: demandes.isEmpty
-            ? _buildEmpty()
-            : _buildList(),
+        child: demandes.isEmpty ? _buildEmpty() : _buildList(),
       ),
     );
   }
@@ -171,19 +232,11 @@ class _MesDemandesScreenState extends State<MesDemandesScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            Icons.send_outlined,
-            size: 80,
-            color: Colors.grey.shade300,
-          ),
+          Icon(Icons.send_outlined, size: 80, color: Colors.grey.shade300),
           const SizedBox(height: 16),
           const Text(
             'Aucune demande envoyée',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Colors.grey,
-            ),
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey),
           ),
           const SizedBox(height: 8),
           const Text(
@@ -211,6 +264,7 @@ class _MesDemandesScreenState extends State<MesDemandesScreen> {
     final statusLabel = _getStatusLabel(status);
     final salonName = demande['salonName'] ?? 'Salon';
     final salonLocalisation = demande['salonLocalisation'] ?? '';
+    final demandeId = demande['id'];
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -229,10 +283,7 @@ class _MesDemandesScreenState extends State<MesDemandesScreen> {
         children: [
           // Header statut
           Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: 10,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
               color: statusColor.withOpacity(0.1),
               borderRadius: const BorderRadius.only(
@@ -255,10 +306,7 @@ class _MesDemandesScreenState extends State<MesDemandesScreen> {
                 const Spacer(),
                 Text(
                   _getTimeAgo(demande['createdAt']),
-                  style: TextStyle(
-                    color: statusColor,
-                    fontSize: 12,
-                  ),
+                  style: TextStyle(color: statusColor, fontSize: 12),
                 ),
               ],
             ),
@@ -269,7 +317,6 @@ class _MesDemandesScreenState extends State<MesDemandesScreen> {
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
-                // Icône salon
                 Container(
                   width: 56,
                   height: 56,
@@ -277,15 +324,9 @@ class _MesDemandesScreenState extends State<MesDemandesScreen> {
                     color: marron.withOpacity(0.1),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(
-                    Icons.store,
-                    color: marron,
-                    size: 28,
-                  ),
+                  child: const Icon(Icons.store, color: marron, size: 28),
                 ),
                 const SizedBox(width: 16),
-
-                // Infos salon
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -302,19 +343,12 @@ class _MesDemandesScreenState extends State<MesDemandesScreen> {
                         const SizedBox(height: 4),
                         Row(
                           children: [
-                            const Icon(
-                              Icons.location_on,
-                              size: 14,
-                              color: Colors.grey,
-                            ),
+                            const Icon(Icons.location_on, size: 14, color: Colors.grey),
                             const SizedBox(width: 4),
                             Expanded(
                               child: Text(
                                 salonLocalisation,
-                                style: const TextStyle(
-                                  color: Colors.grey,
-                                  fontSize: 13,
-                                ),
+                                style: const TextStyle(color: Colors.grey, fontSize: 13),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -329,82 +363,55 @@ class _MesDemandesScreenState extends State<MesDemandesScreen> {
             ),
           ),
 
-          // Message selon statut
-          if (status == 'PENDING') ...[
-            const Divider(height: 0),
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.info_outline,
-                    size: 16,
-                    color: orange.withOpacity(0.7),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
+          // Message + bouton annuler selon statut
+          const Divider(height: 0),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: status == 'PENDING'
+                ? Row(
+              children: [
+                Icon(Icons.info_outline, size: 16, color: orange.withOpacity(0.7)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
                     'En attente de réponse de l\'admin du salon',
-                    style: TextStyle(
-                      color: orange.withOpacity(0.7),
-                      fontSize: 13,
-                    ),
+                    style: TextStyle(color: orange.withOpacity(0.7), fontSize: 13),
                   ),
-                ],
-              ),
+                ),
+                const SizedBox(width: 8),
+                // Bouton annuler
+                TextButton.icon(
+                  onPressed: () => _confirmerAnnulation(demandeId, salonName),
+                  icon: const Icon(Icons.cancel_outlined, color: rouge, size: 16),
+                  label: const Text('Annuler', style: TextStyle(color: rouge, fontSize: 13)),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  ),
+                ),
+              ],
+            )
+                : Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  status == 'ACCEPTED' ? Icons.check_circle : Icons.cancel,
+                  size: 16,
+                  color: statusColor.withOpacity(0.7),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  status == 'ACCEPTED'
+                      ? 'Vous faites partie de ce salon !'
+                      : 'Votre demande a été refusée',
+                  style: TextStyle(
+                    color: statusColor.withOpacity(0.7),
+                    fontSize: 13,
+                    fontWeight: status == 'ACCEPTED' ? FontWeight.bold : FontWeight.normal,
+                  ),
+                ),
+              ],
             ),
-          ],
-
-          if (status == 'ACCEPTED') ...[
-            const Divider(height: 0),
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.check_circle,
-                    size: 16,
-                    color: vert.withOpacity(0.7),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Vous faites partie de ce salon !',
-                    style: TextStyle(
-                      color: vert.withOpacity(0.7),
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-
-          if (status == 'REJECTED') ...[
-            const Divider(height: 0),
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.cancel,
-                    size: 16,
-                    color: rouge.withOpacity(0.7),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Votre demande a été refusée',
-                    style: TextStyle(
-                      color: rouge.withOpacity(0.7),
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+          ),
         ],
       ),
     );

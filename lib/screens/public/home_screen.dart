@@ -11,7 +11,7 @@ import 'notifications_screen.dart';
 import 'conversations_screen.dart';
 import '../../services/websocket_service.dart';
 import '../../services/api_service.dart';
-
+import '../../config/app_config.dart';
 class HomeScreen extends StatefulWidget {
   final String? token;
   final String? role;
@@ -32,6 +32,7 @@ class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
   int _newSalonsCount = 0;
   bool _isAdmin = false;
+  bool _locationPermissionGranted = false;
 
   GoogleMapController? mapController;
   List<Salon> salons = [];
@@ -93,7 +94,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (widget.role != 'COIFFEUR') return;
     try {
       final response = await ApiService.get(
-        'http://127.0.0.1:8080/api/coiffeurs/profile',
+        '${AppConfig.baseUrl}/api/coiffeurs/profile',
         widget.token ?? '',
       );
       final data = json.decode(response.body);
@@ -112,7 +113,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _fetchUnreadMessagesCount() async {
     try {
       final response = await ApiService.get(
-        'http://127.0.0.1:8080/api/messages/conversations',
+        '${AppConfig.baseUrl}/api/messages/conversations',
         widget.token ?? '',
       );
       final data = json.decode(response.body);
@@ -131,7 +132,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _fetchUnreadCount() async {
     try {
       final response = await ApiService.get(
-        'http://127.0.0.1:8080/api/notifications/user',
+        '${AppConfig.baseUrl}/api/notifications/user',
         widget.token ?? '',
       );
       final data = json.decode(response.body);
@@ -158,9 +159,16 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!serviceEnabled) return;
 
       LocationPermission permission = await Geolocator.checkPermission();
+
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) return;
+      }
+
+      // ← ajouter ce cas
+      if (permission == LocationPermission.deniedForever) {
+        await Geolocator.openAppSettings(); // ← ouvre les paramètres
+        return;
       }
 
       Position position = await Geolocator.getCurrentPosition(
@@ -169,7 +177,10 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
 
-      setState(() => userPosition = position);
+      setState(() {
+        userPosition = position;
+        _locationPermissionGranted = true; // ← ajouter
+      });
     } catch (e) {
       debugPrint('Erreur localisation: $e');
     }
@@ -190,7 +201,7 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => isLoading = true);
     try {
       final response = await ApiService.get(
-        'http://127.0.0.1:8080/api/salons',
+        '${AppConfig.baseUrl}/api/salons',
         widget.token ?? '',
       );
       final data = json.decode(response.body);
@@ -397,7 +408,7 @@ class _HomeScreenState extends State<HomeScreen> {
           initialCameraPosition: _initialPosition,
           markers: markers,
           polylines: polylines,
-          myLocationEnabled: true,
+          myLocationEnabled: _locationPermissionGranted,
           myLocationButtonEnabled: false,
           compassEnabled: false,
           mapToolbarEnabled: false,

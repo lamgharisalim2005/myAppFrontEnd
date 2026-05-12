@@ -4,7 +4,7 @@ import '../../services/websocket_service.dart';
 import 'dart:convert';
 import 'dart:async';
 import 'public_profile_screen.dart';
-
+import '../../config/app_config.dart';
 class ChatScreen extends StatefulWidget {
   final String token;
   final String otherUserId;
@@ -125,7 +125,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _checkOnlineStatus() async {
     try {
       final response = await ApiService.get(
-        'http://127.0.0.1:8080/api/messages/online/${widget.otherUserId}',
+        '${AppConfig.baseUrl}/api/messages/online/${widget.otherUserId}',
         widget.token,
       );
       if (response.statusCode == 200) {
@@ -142,7 +142,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _checkBlockStatus() async {
     try {
       final response = await ApiService.get(
-        'http://127.0.0.1:8080/api/blocks/${widget.otherUserId}',
+        '${AppConfig.baseUrl}/api/blocks/${widget.otherUserId}',
         widget.token,
       );
       if (response.statusCode == 200) {
@@ -160,11 +160,11 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final response = _isBlocked
           ? await ApiService.delete(
-        'http://127.0.0.1:8080/api/blocks/${widget.otherUserId}',
+        '${AppConfig.baseUrl}/api/blocks/${widget.otherUserId}',
         widget.token,
       )
           : await ApiService.post(
-        'http://127.0.0.1:8080/api/blocks/${widget.otherUserId}',
+        '${AppConfig.baseUrl}/api/blocks/${widget.otherUserId}',
         widget.token,
       );
 
@@ -192,7 +192,7 @@ class _ChatScreenState extends State<ChatScreen> {
     for (var messageId in _selectedMessages) {
       try {
         await ApiService.delete(
-          'http://127.0.0.1:8080/api/messages/$messageId',
+          '${AppConfig.baseUrl}/api/messages/$messageId',
           widget.token,
         );
       } catch (e) {
@@ -215,7 +215,7 @@ class _ChatScreenState extends State<ChatScreen> {
       });
 
       final response = await ApiService.get(
-        'http://127.0.0.1:8080/api/messages/conversation?otherUserId=${widget.otherUserId}',
+        '${AppConfig.baseUrl}/api/messages/conversation?otherUserId=${widget.otherUserId}',
         widget.token,
       );
 
@@ -246,7 +246,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _markAsRead(String messageId) async {
     try {
       await ApiService.put(
-        'http://127.0.0.1:8080/api/messages/$messageId/read',
+        '${AppConfig.baseUrl}/api/messages/$messageId/read',
         widget.token,
       );
     } catch (e) {
@@ -271,7 +271,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     try {
       final response = await ApiService.post(
-        'http://127.0.0.1:8080/api/messages',
+        '${AppConfig.baseUrl}/api/messages',
         widget.token,
         body: json.encode({
           'receiverId': widget.otherUserId,

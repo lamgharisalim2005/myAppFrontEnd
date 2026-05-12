@@ -4,6 +4,8 @@ import 'dart:convert';
 import '../../services/websocket_service.dart';
 import '../client/reservations_screen.dart';
 import '../coiffeur/demandes_salon_screen.dart';
+import '../../config/app_config.dart';
+import '../coiffeur/mes_demandes_screen.dart';
 
 class NotificationsScreen extends StatefulWidget {
   final String token;
@@ -28,7 +30,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   bool isLoading = true;
   String? errorMessage;
 
-  // Pour naviguer vers demandes salon (admin)
   String? _salonId;
   String? _salonName;
 
@@ -52,7 +53,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       });
 
       final response = await ApiService.get(
-        'http://127.0.0.1:8080/api/notifications/user',
+        '${AppConfig.baseUrl}/api/notifications/user',
         widget.token,
       );
 
@@ -71,7 +72,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             isLoading = false;
           });
 
-          // Si coiffeur → récupérer son salonId pour navigation
           if (widget.role == 'COIFFEUR') {
             await _fetchSalonId();
           }
@@ -90,18 +90,24 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     }
   }
 
-  // Récupérer le salonId du coiffeur admin
   Future<void> _fetchSalonId() async {
     try {
+      debugPrint('🔍 _fetchSalonId appelé');
       final profileResponse = await ApiService.get(
-        'http://127.0.0.1:8080/api/coiffeurs/profile',
+        '${AppConfig.baseUrl}/api/coiffeurs/profile',
         widget.token,
       );
       final profileData = json.decode(profileResponse.body);
       if (profileData['status'] == 'success') {
+        final isAdmin = profileData['data']['isAdmin'] ?? profileData['data']['admin'] ?? false;
+
+        // Si pas admin → on arrête ici
+        debugPrint('🔍 isAdmin dans _fetchSalonId: $isAdmin');
+        if (!isAdmin) return;
+
         final coiffeurId = profileData['data']['userId'];
         final detailResponse = await ApiService.get(
-          'http://127.0.0.1:8080/api/coiffeurs/$coiffeurId/detail',
+          '${AppConfig.baseUrl}/api/coiffeurs/$coiffeurId/detail',
           widget.token,
         );
         final detailData = json.decode(detailResponse.body);
@@ -125,7 +131,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
     try {
       final response = await ApiService.put(
-        'http://127.0.0.1:8080/api/notifications/$notificationId/read',
+        '${AppConfig.baseUrl}/api/notifications/$notificationId/read',
         widget.token,
       );
 
@@ -143,51 +149,83 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     }
   }
 
-  // Navigation selon eventType
   void _naviguerVersEvenement(
       Map<String, dynamic> notification, int index) async {
-    // Marquer comme lue d'abord
     await _markAsRead(notification['id'], index);
 
     if (!mounted) return;
 
     final eventType = notification['eventType'];
+    final message = notification['message'] ?? '';
 
     switch (eventType) {
       case 'RESERVATION':
-      case 'PAYMENT':
-      // Client ET Coiffeur → page Réservations
+        int tabIndex = 0;
+        if (message.toLowerCase().contains('confirmée') ||
+            message.toLowerCase().contains('confirmé')) {
+          tabIndex = 1;
+        } else if (message.toLowerCase().contains('refusée') ||
+            message.toLowerCase().contains('refusé')) {
+          tabIndex = 0;
+        } else if (message.toLowerCase().contains('nouvelle')) {
+          tabIndex = 0;
+        }
+
         Navigator.push(
           context,
           MaterialPageRoute(
             builder: (_) => ReservationsScreen(
               token: widget.token,
               role: widget.role,
+              initialIndex: tabIndex,
+              highlightReservationId: notification['entityId'],
+            ),
+          ),
+        );
+        break;
+
+      case 'PAYMENT':
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ReservationsScreen(
+              token: widget.token,
+              role: widget.role,
+              initialIndex: 1,
+              highlightReservationId: notification['entityId'],
             ),
           ),
         );
         break;
 
       case 'SALON_REQUEST':
-      // Coiffeur Admin → page Demandes reçues
-        if (widget.role == 'COIFFEUR' &&
-            _salonId != null &&
-            _salonName != null) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => DemandesSalonScreen(
-                token: widget.token,
-                salonId: _salonId!,
-                salonName: _salonName!,
+        if (widget.role == 'COIFFEUR') {
+          if (_salonId == null) {
+            await _fetchSalonId();
+          }
+          if (_salonId != null && _salonName != null) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => DemandesSalonScreen(
+                  token: widget.token,
+                  salonId: _salonId!,
+                  salonName: _salonName!,
+                ),
               ),
-            ),
-          );
+            );
+          } else {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => MesDemandesScreen(token: widget.token),
+              ),
+            );
+          }
         }
         break;
 
       default:
-      // Pas de navigation spéciale
         break;
     }
   }
@@ -376,7 +414,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     final icon = _getIcon(eventType);
     final color = _getColor(eventType);
 
-    // Vérifier si la notification est navigable
     final bool isNavigable = eventType == 'RESERVATION' ||
         eventType == 'PAYMENT' ||
         (eventType == 'SALON_REQUEST' &&
@@ -471,7 +508,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                             color: Colors.grey.shade400,
                           ),
                         ),
-                        // Indicateur navigable
                         if (isNavigable)
                           Row(
                             children: [

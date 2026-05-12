@@ -3,6 +3,7 @@ import '../../services/api_service.dart';
 import 'dart:convert';
 import '../../models/service.dart';
 import '../../models/work_schedule.dart';
+import '../../config/app_config.dart';
 
 class ReservationScreen extends StatefulWidget {
   final String coiffeurId;
@@ -70,11 +71,11 @@ class _ReservationScreenState extends State<ReservationScreen> {
       });
 
       final wsResponse = await ApiService.get(
-        'http://127.0.0.1:8080/api/workschedules/coiffeur/${widget.coiffeurId}',
+        '${AppConfig.baseUrl}/api/workschedules/coiffeur/${widget.coiffeurId}',
         widget.token,
       );
       final slotResponse = await ApiService.get(
-        'http://127.0.0.1:8080/api/reservations/coiffeur/${widget.coiffeurId}/slots',
+        '${AppConfig.baseUrl}/api/reservations/coiffeur/${widget.coiffeurId}/slots',
         widget.token,
       );
 
@@ -129,10 +130,12 @@ class _ReservationScreenState extends State<ReservationScreen> {
   int get totalDuration =>
       widget.selectedServices.fold(0, (sum, s) => sum + s.duration);
 
-  // Vérifie si un créneau est occupé
-  bool _isOccupied(DateTime start, DateTime end) {
+  // Vérifie si une minute précise est dans un slot occupé
+  bool _isMinuteOccupied(DateTime minute) {
+    final minuteEnd = minute.add(const Duration(minutes: 1));
     return occupiedSlots.any((slot) {
-      return start.isBefore(slot['end']!) && end.isAfter(slot['start']!);
+      return minute.isBefore(slot['end']!) &&
+          minuteEnd.isAfter(slot['start']!);
     });
   }
 
@@ -152,7 +155,6 @@ class _ReservationScreenState extends State<ReservationScreen> {
     );
     final endDT = selectedDT.add(Duration(minutes: totalDuration));
 
-    // Vérifier dans les horaires de travail
     bool dansHoraires = false;
     for (var schedule in schedules) {
       final startParts = schedule.startTime.split(':');
@@ -173,7 +175,6 @@ class _ReservationScreenState extends State<ReservationScreen> {
         int.parse(endParts[1]),
       );
 
-      // Le créneau doit commencer ET finir dans les horaires
       if (!selectedDT.isBefore(workStart) && !endDT.isAfter(workEnd)) {
         dansHoraires = true;
         break;
@@ -184,15 +185,17 @@ class _ReservationScreenState extends State<ReservationScreen> {
       return 'Hors des horaires de travail\n(le service finit après la fermeture)';
     }
 
-    // Vérifier si occupé
-    if (_isOccupied(selectedDT, endDT)) {
-      return 'Ce créneau est déjà occupé';
+    // Vérifier si une minute dans le créneau est occupée
+    for (int i = 0; i < totalDuration; i++) {
+      final minute = selectedDT.add(Duration(minutes: i));
+      if (_isMinuteOccupied(minute)) {
+        return 'Ce créneau est déjà occupé';
+      }
     }
 
-    return null; // Valide !
+    return null;
   }
 
-  // Afficher le dialog de sélection d'heure
   void _showTimePicker(WorkSchedule schedule) {
     TimeOfDay selectedTimeDialog = TimeOfDay(
       hour: int.parse(schedule.startTime.split(':')[0]),
@@ -245,7 +248,6 @@ class _ReservationScreenState extends State<ReservationScreen> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Horaires du coiffeur
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -269,7 +271,6 @@ class _ReservationScreenState extends State<ReservationScreen> {
               ),
               const SizedBox(height: 16),
 
-              // Bouton sélection heure
               GestureDetector(
                 onTap: () async {
                   final picked = await showTimePicker(
@@ -336,7 +337,6 @@ class _ReservationScreenState extends State<ReservationScreen> {
                 ),
               ),
 
-              // Heure de fin calculée
               const SizedBox(height: 12),
               Builder(
                 builder: (_) {
@@ -367,7 +367,6 @@ class _ReservationScreenState extends State<ReservationScreen> {
                 },
               ),
 
-              // Message validation
               if (validationError != null) ...[
                 const SizedBox(height: 12),
                 Container(
@@ -406,7 +405,6 @@ class _ReservationScreenState extends State<ReservationScreen> {
               onPressed: validationError != null
                   ? null
                   : () {
-                // Vérifier une dernière fois
                 final error = _validerHeure(selectedTimeDialog);
                 if (error != null) {
                   setStateDialog(() => validationError = error);
@@ -446,7 +444,7 @@ class _ReservationScreenState extends State<ReservationScreen> {
 
     try {
       final response = await ApiService.post(
-        'http://127.0.0.1:8080/api/reservations',
+        '${AppConfig.baseUrl}/api/reservations',
         widget.token,
         body: json.encode({
           'coiffeurId': widget.coiffeurId,
@@ -550,11 +548,9 @@ class _ReservationScreenState extends State<ReservationScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Résumé
           _buildSummary(),
           const SizedBox(height: 16),
 
-          // Sélection du jour
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: const Text(
@@ -570,7 +566,6 @@ class _ReservationScreenState extends State<ReservationScreen> {
           _buildDaySelector(),
           const SizedBox(height: 24),
 
-          // Barre des horaires
           if (selectedDate != null) ...[
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -589,7 +584,6 @@ class _ReservationScreenState extends State<ReservationScreen> {
             _buildHoraireBars(),
           ],
 
-          // Créneau sélectionné
           if (selectedTime != null) ...[
             const SizedBox(height: 16),
             _buildSelectedSlot(),
@@ -623,8 +617,7 @@ class _ReservationScreenState extends State<ReservationScreen> {
               const CircleAvatar(
                 backgroundColor: marron,
                 radius: 20,
-                child:
-                Icon(Icons.person, color: Colors.white, size: 20),
+                child: Icon(Icons.person, color: Colors.white, size: 20),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -640,9 +633,7 @@ class _ReservationScreenState extends State<ReservationScreen> {
                       ),
                     ),
                     Text(
-                      widget.selectedServices
-                          .map((s) => s.name)
-                          .join(', '),
+                      widget.selectedServices.map((s) => s.name).join(', '),
                       style: const TextStyle(
                         fontSize: 13,
                         color: Colors.grey,
@@ -661,8 +652,7 @@ class _ReservationScreenState extends State<ReservationScreen> {
             children: [
               Row(
                 children: [
-                  const Icon(Icons.access_time,
-                      size: 16, color: Colors.grey),
+                  const Icon(Icons.access_time, size: 16, color: Colors.grey),
                   const SizedBox(width: 4),
                   Text(
                     '$totalDuration min',
@@ -824,7 +814,6 @@ class _ReservationScreenState extends State<ReservationScreen> {
     );
   }
 
-  // Barre visuelle des horaires
   Widget _buildHoraireBars() {
     if (selectedDate == null) return const SizedBox();
 
@@ -869,10 +858,6 @@ class _ReservationScreenState extends State<ReservationScreen> {
       endHour, endMin,
     );
 
-    // Dernier créneau possible = workEnd - totalDuration
-    final lastPossibleStart =
-    workEnd.subtract(Duration(minutes: totalDuration));
-
     final totalMinutes = workEnd.difference(workStart).inMinutes;
 
     return Container(
@@ -891,154 +876,66 @@ class _ReservationScreenState extends State<ReservationScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Horaires
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                '${schedule.startTime.substring(0, 5)}',
+                schedule.startTime.substring(0, 5),
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   color: marron,
+                  fontSize: 13,
                 ),
               ),
               Text(
-                'Dernier départ : ${lastPossibleStart.hour.toString().padLeft(2, '0')}:${lastPossibleStart.minute.toString().padLeft(2, '0')}',
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey,
-                ),
-              ),
-              Text(
-                '${schedule.endTime.substring(0, 5)}',
+                schedule.endTime.substring(0, 5),
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   color: marron,
+                  fontSize: 13,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
 
-          // Barre visuelle
           GestureDetector(
             onTapDown: (details) {
-              // Calculer l'heure cliquée
-              final RenderBox box =
-              context.findRenderObject() as RenderBox;
-              final localPos = details.localPosition;
-              final barWidth =
-                  box.size.width - 32; // padding 16 de chaque côté
-
-              final ratio = (localPos.dx / barWidth).clamp(0.0, 1.0);
-              final clickedMinutes =
-                  (ratio * totalMinutes).round() + startHour * 60 + startMin;
-
-              final clickedHour = clickedMinutes ~/ 60;
-              final clickedMin = clickedMinutes % 60;
-
-              // Arrondir aux 5 minutes
-              final roundedMin = (clickedMin / 5).round() * 5;
-              final finalMin = roundedMin >= 60 ? 55 : roundedMin;
-              final finalHour =
-              roundedMin >= 60 ? clickedHour + 1 : clickedHour;
-
-              final clickedTime =
-              TimeOfDay(hour: finalHour, minute: finalMin);
-
-              // Vérifier si dans la zone disponible
-              final clickedDT = DateTime(
-                selectedDate!.year,
-                selectedDate!.month,
-                selectedDate!.day,
-                clickedTime.hour,
-                clickedTime.minute,
-              );
-
-              if (clickedDT.isAfter(lastPossibleStart) ||
-                  clickedDT.isBefore(workStart)) {
-                // Zone non cliquable → ouvrir quand même le picker
-              }
-
               _showTimePicker(schedule);
             },
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final barWidth = constraints.maxWidth;
 
-                // Construire les segments
-                List<Widget> segments = [];
-                DateTime current = workStart;
-
-                while (current.isBefore(workEnd)) {
-                  // Fin du segment actuel = 1 minute après
-                  DateTime segEnd = current;
-
-                  // Chercher la fin du segment actuel (même statut)
-                  final currentDT = current;
-                  final currentEndDT =
-                  currentDT.add(Duration(minutes: totalDuration));
-
-                  // Statut de ce moment
-                  bool isOccupiedNow =
-                  _isOccupied(currentDT, currentEndDT);
-                  bool isPastLastStart =
-                  currentDT.isAfter(lastPossibleStart);
-                  bool isUnavailable = isOccupiedNow || isPastLastStart;
-
-                  // Trouver la fin du segment
-                  segEnd = current.add(const Duration(minutes: 1));
-                  while (segEnd.isBefore(workEnd)) {
-                    final segDT = segEnd;
-                    final segEndDT =
-                    segDT.add(Duration(minutes: totalDuration));
-                    final segOccupied = _isOccupied(segDT, segEndDT);
-                    final segPast =
-                    segDT.isAfter(lastPossibleStart);
-                    final segUnavailable = segOccupied || segPast;
-
-                    if (segUnavailable != isUnavailable) break;
-                    segEnd =
-                        segEnd.add(const Duration(minutes: 1));
-                  }
-
-                  final segMinutes =
-                      segEnd.difference(current).inMinutes;
-                  final segWidth =
-                      (segMinutes / totalMinutes) * barWidth;
-
-                  segments.add(
-                    Container(
-                      width: segWidth,
-                      height: 40,
-                      color: isUnavailable
-                          ? rouge.withOpacity(0.7)
-                          : vert.withOpacity(0.7),
-                    ),
-                  );
-
-                  current = segEnd;
-                }
-
                 return Column(
                   children: [
                     ClipRRect(
                       borderRadius: BorderRadius.circular(8),
-                      child: Row(children: segments),
+                      child: SizedBox(
+                        height: 40,
+                        width: barWidth,
+                        child: CustomPaint(
+                          painter: _ScheduleBarPainter(
+                            workStart: workStart,
+                            workEnd: workEnd,
+                            totalMinutes: totalMinutes,
+                            occupiedSlots: occupiedSlots,
+                            vertColor: vert,
+                            rougeColor: rouge,
+                          ),
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 8),
-                    // Indication clic
                     const Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(Icons.touch_app, size: 14, color: Colors.grey),
                         SizedBox(width: 4),
                         Text(
-                          'Appuyez sur la barre pour choisir votre heure',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.grey,
-                          ),
+                          'Appuyez pour choisir votre heure',
+                          style:
+                          TextStyle(fontSize: 11, color: Colors.grey),
                         ),
                       ],
                     ),
@@ -1098,7 +995,6 @@ class _ReservationScreenState extends State<ReservationScreen> {
               ],
             ),
           ),
-          // Bouton modifier
           TextButton(
             onPressed: () {
               final schedules = _getSchedulesForDate(selectedDate!);
@@ -1160,4 +1056,78 @@ class _ReservationScreenState extends State<ReservationScreen> {
       ),
     );
   }
+}
+
+// CustomPainter pour dessiner la barre avec précision à la minute
+class _ScheduleBarPainter extends CustomPainter {
+  final DateTime workStart;
+  final DateTime workEnd;
+  final int totalMinutes;
+  final List<Map<String, DateTime>> occupiedSlots;
+  final Color vertColor;
+  final Color rougeColor;
+
+  _ScheduleBarPainter({
+    required this.workStart,
+    required this.workEnd,
+    required this.totalMinutes,
+    required this.occupiedSlots,
+    required this.vertColor,
+    required this.rougeColor,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paintVert = Paint()..color = vertColor.withOpacity(0.7);
+    final paintRouge = Paint()..color = rougeColor.withOpacity(0.7);
+    final paintDivider = Paint()
+      ..color = Colors.white.withOpacity(0.8)
+      ..strokeWidth = 0.5;
+
+    // Dessiner minute par minute pour une précision parfaite
+    for (int i = 0; i < totalMinutes; i++) {
+      final minute = workStart.add(Duration(minutes: i));
+      final minuteEnd = minute.add(const Duration(minutes: 1));
+
+      // Vérifier si cette minute est occupée
+      final isOccupied = occupiedSlots.any((slot) =>
+      minute.isBefore(slot['end']!) &&
+          minuteEnd.isAfter(slot['start']!));
+
+      final x = (i / totalMinutes) * size.width;
+      final w = size.width / totalMinutes;
+
+      final rect = Rect.fromLTWH(x, 0, w, size.height);
+      canvas.drawRect(rect, isOccupied ? paintRouge : paintVert);
+    }
+
+    // Dessiner les diviseurs par dessus
+    for (int i = 0; i < totalMinutes; i++) {
+      final minutesFromStart = i;
+      final isHour = minutesFromStart % 60 == 0;
+      final isHalfHour = minutesFromStart % 30 == 0 && !isHour;
+      final isQuarter = minutesFromStart % 15 == 0 && !isHour && !isHalfHour;
+
+      if (i > 0 && (isHour || isHalfHour || isQuarter)) {
+        final x = (i / totalMinutes) * size.width;
+        final dividerHeight = isHour
+            ? size.height
+            : isHalfHour
+            ? size.height * 0.7
+            : size.height * 0.4;
+
+        final dividerWidth = isHour ? 1.5 : isHalfHour ? 1.0 : 0.5;
+        paintDivider.strokeWidth = dividerWidth;
+
+        canvas.drawLine(
+          Offset(x, size.height - dividerHeight),
+          Offset(x, size.height),
+          paintDivider,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }

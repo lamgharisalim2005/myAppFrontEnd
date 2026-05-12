@@ -3,7 +3,7 @@ import '../../services/api_service.dart';
 import 'dart:convert';
 import '../../models/coiffeur.dart';
 import 'coiffeur_detail_screen.dart';
-
+import '../../config/app_config.dart';
 class SalonDetailScreen extends StatefulWidget {
   final String salonId;
   final String salonName;
@@ -52,6 +52,11 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
     super.dispose();
   }
 
+  bool _estMembreDeCeSalon() {
+    if (widget.userId == null) return false;
+    return coiffeurs.any((c) => c.coiffeurId == widget.userId);
+  }
+
   Future<void> _fetchSalonDetail() async {
     try {
       setState(() {
@@ -60,7 +65,7 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
       });
 
       final response = await ApiService.get(
-        'http://127.0.0.1:8080/api/salons/${widget.salonId}/detail',
+        '${AppConfig.baseUrl}/api/salons/${widget.salonId}/detail',
         widget.token ?? '',
       );
 
@@ -102,7 +107,7 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
 
     try {
       final response = await ApiService.post(
-        'http://127.0.0.1:8080/api/salon-requests',
+        '${AppConfig.baseUrl}/api/salon-requests',
         widget.token ?? '',
         body: json.encode({'salonId': widget.salonId}),
       );
@@ -461,7 +466,7 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
                 const Divider(height: 32),
 
                 // Bouton Rejoindre (COIFFEUR seulement et pas admin)
-                if (widget.role == 'COIFFEUR' && !widget.isAdmin)
+                if (widget.role == 'COIFFEUR' && !widget.isAdmin && !_estMembreDeCeSalon())
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(

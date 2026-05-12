@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
 import 'dart:convert';
-
+import '../../config/app_config.dart';
 class MesServicesScreen extends StatefulWidget {
   final String token;
 
@@ -33,7 +33,7 @@ class _MesServicesScreenState extends State<MesServicesScreen> {
     });
     try {
       final response = await ApiService.get(
-        'http://127.0.0.1:8080/api/coiffeurs/profile',
+        '${AppConfig.baseUrl}/api/coiffeurs/profile',
         widget.token,
       );
 
@@ -54,7 +54,7 @@ class _MesServicesScreenState extends State<MesServicesScreen> {
   Future<void> _fetchServicesById(String coiffeurId) async {
     try {
       final response = await ApiService.get(
-        'http://127.0.0.1:8080/api/coiffeurs/$coiffeurId/detail',
+        '${AppConfig.baseUrl}/api/coiffeurs/$coiffeurId/detail',
         widget.token,
       );
 
@@ -81,7 +81,7 @@ class _MesServicesScreenState extends State<MesServicesScreen> {
   Future<void> _creerService(String name, String description, double price, int duration) async {
     try {
       final response = await ApiService.post(
-        'http://127.0.0.1:8080/api/services',
+        '${AppConfig.baseUrl}/api/services',
         widget.token,
         body: json.encode({
           'name': name,
@@ -110,7 +110,7 @@ class _MesServicesScreenState extends State<MesServicesScreen> {
   Future<void> _modifierService(String id, String name, String description, double price, int duration) async {
     try {
       final response = await ApiService.put(
-        'http://127.0.0.1:8080/api/services/$id',
+        '${AppConfig.baseUrl}/api/services/$id',
         widget.token,
         body: json.encode({
           'name': name,
@@ -139,7 +139,7 @@ class _MesServicesScreenState extends State<MesServicesScreen> {
   Future<void> _supprimerService(String id) async {
     try {
       final response = await ApiService.delete(
-        'http://127.0.0.1:8080/api/services/$id',
+        '${AppConfig.baseUrl}/api/services/$id',
         widget.token,
       );
 

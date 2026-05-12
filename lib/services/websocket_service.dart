@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:stomp_dart_client/stomp_dart_client.dart';
 import 'dart:async';
 import 'dart:convert';
-
+import '../config/app_config.dart';
 class WebSocketService {
   static final WebSocketService _instance = WebSocketService._internal();
   factory WebSocketService() => _instance;

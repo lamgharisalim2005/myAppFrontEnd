@@ -6,6 +6,7 @@ import 'dart:convert';
 import '../public/home_screen.dart';
 import 'role_screen.dart';
 import '../../services/websocket_service.dart';
+import '../../config/app_config.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -17,24 +18,25 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   static const Color marron = Color(0xFF795548);
   bool isLoading = false;
-
-  final GoogleSignIn _googleSignIn = GoogleSignIn.instance;
+  String? errorMessage;
 
   Future<void> _signInWithGoogle() async {
-    setState(() => isLoading = true);
+    setState(() {
+      isLoading = true;
+      errorMessage = null;
+    });
 
     try {
-      // 1. Ouvrir Google Sign In
       await GoogleSignIn.instance.initialize(
         serverClientId: '681462135328-olls77t7uuqtjablr8sfoki1jn5v689g.apps.googleusercontent.com',
       );
-      final GoogleSignInAccount? account = await GoogleSignIn.instance.authenticate();
+      final GoogleSignInAccount? account =
+      await GoogleSignIn.instance.authenticate();
       if (account == null) {
         setState(() => isLoading = false);
         return;
       }
 
-      // 2. Récupérer le token Google
       final GoogleSignInAuthentication auth = await account.authentication;
       final String? idToken = auth.idToken;
 
@@ -43,9 +45,8 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
-      // 3. Vérifier si l'utilisateur existe
       final response = await http.post(
-        Uri.parse('http://127.0.0.1:8080/api/auth/google/check'),
+        Uri.parse('${AppConfig.baseUrl}/api/auth/google/check'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({'idToken': idToken}),
       );
@@ -53,7 +54,6 @@ class _LoginScreenState extends State<LoginScreen> {
       final data = json.decode(response.body);
 
       if (response.statusCode == 200 && data['status'] == 'success') {
-        // ✅ Utilisateur EXISTANT → connecter directement
         final token = data['data']['token'];
         final role = data['data']['role'];
         final name = data['data']['name'];
@@ -65,20 +65,19 @@ class _LoginScreenState extends State<LoginScreen> {
         await prefs.setString('name', name);
         await prefs.setString('userId', userId);
 
-// Initialiser le WebSocket global après connexion
         WebSocketService().connect(token, userId);
 
         if (mounted) {
           Navigator.pushAndRemoveUntil(
             context,
             MaterialPageRoute(
-              builder: (_) => HomeScreen(token: token, role: role, userId: userId),
+              builder: (_) =>
+                  HomeScreen(token: token, role: role, userId: userId),
             ),
                 (route) => false,
           );
         }
       } else {
-        // ❌ Utilisateur NOUVEAU → demander le rôle
         if (mounted) {
           Navigator.push(
             context,
@@ -90,6 +89,9 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     } catch (e) {
       debugPrint('Erreur: $e');
+      setState(() {
+        errorMessage = 'Impossible de se connecter. Vérifiez votre connexion Internet.';
+      });
     }
 
     setState(() => isLoading = false);
@@ -109,7 +111,7 @@ class _LoginScreenState extends State<LoginScreen> {
               Container(
                 width: 100,
                 height: 100,
-                decoration: BoxDecoration(
+                decoration: const BoxDecoration(
                   color: marron,
                   shape: BoxShape.circle,
                 ),
@@ -141,12 +143,41 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 48),
 
+              // Message erreur
+              if (errorMessage != null) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.red.shade200),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.wifi_off, color: Colors.red, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          errorMessage!,
+                          style: const TextStyle(
+                            color: Colors.red,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+
               // Bouton Google
               isLoading
                   ? const CircularProgressIndicator(color: marron)
                   : GestureDetector(
                 onTap: _signInWithGoogle,
                 child: Container(
+                  width: double.infinity,
                   padding: const EdgeInsets.symmetric(
                     horizontal: 24,
                     vertical: 16,
@@ -165,10 +196,23 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Image.network(
-                        'https://www.google.com/favicon.ico',
+                      // Icône Google sans network image
+                      Container(
                         width: 24,
                         height: 24,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          'G',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red,
+                          ),
+                        ),
                       ),
                       const SizedBox(width: 12),
                       const Text(

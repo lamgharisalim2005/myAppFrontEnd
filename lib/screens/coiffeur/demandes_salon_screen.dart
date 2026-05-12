@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
 import 'dart:convert';
 import '../public/coiffeur_detail_screen.dart';
-
+import '../../config/app_config.dart';
 class DemandesSalonScreen extends StatefulWidget {
   final String token;
   final String salonId;
@@ -42,7 +42,7 @@ class _DemandesSalonScreenState extends State<DemandesSalonScreen> {
     });
     try {
       final response = await ApiService.get(
-        'http://127.0.0.1:8080/api/salon-requests/salon/${widget.salonId}',
+        '${AppConfig.baseUrl}/api/salon-requests/salon/${widget.salonId}',
         widget.token,
       );
 
@@ -52,6 +52,8 @@ class _DemandesSalonScreenState extends State<DemandesSalonScreen> {
           demandes = (data['data'] as List)
               .where((d) => d['status'] == 'PENDING')
               .toList();
+          demandes.sort((a, b) => DateTime.parse(b['createdAt'])
+              .compareTo(DateTime.parse(a['createdAt'])));
           isLoading = false;
         });
       } else {
@@ -71,7 +73,7 @@ class _DemandesSalonScreenState extends State<DemandesSalonScreen> {
   Future<void> _traiterDemande(String demandeId, String status) async {
     try {
       final response = await ApiService.put(
-        'http://127.0.0.1:8080/api/salon-requests/$demandeId?status=$status',
+        '${AppConfig.baseUrl}/api/salon-requests/$demandeId?status=$status',
         widget.token,
       );
 

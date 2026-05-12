@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
 import 'dart:convert';
-
+import '../../config/app_config.dart';
 class MesHorairesScreen extends StatefulWidget {
   final String token;
 
@@ -60,7 +60,7 @@ class _MesHorairesScreenState extends State<MesHorairesScreen> {
     });
     try {
       final profileResponse = await ApiService.get(
-        'http://127.0.0.1:8080/api/coiffeurs/profile',
+        '${AppConfig.baseUrl}/api/coiffeurs/profile',
         widget.token,
       );
 
@@ -70,7 +70,7 @@ class _MesHorairesScreenState extends State<MesHorairesScreen> {
         coiffeurId = profileData['data']['userId'];
 
         final response = await ApiService.get(
-          'http://127.0.0.1:8080/api/workschedules/coiffeur/$coiffeurId',
+          '${AppConfig.baseUrl}/api/workschedules/coiffeur/$coiffeurId',
           widget.token,
         );
 
@@ -108,7 +108,7 @@ class _MesHorairesScreenState extends State<MesHorairesScreen> {
       String jour, TimeOfDay debut, TimeOfDay fin) async {
     try {
       final response = await ApiService.post(
-        'http://127.0.0.1:8080/api/workschedules',
+        '${AppConfig.baseUrl}/api/workschedules',
         widget.token,
         body: json.encode({
           'dayOfWeek': jour,
@@ -150,7 +150,7 @@ class _MesHorairesScreenState extends State<MesHorairesScreen> {
       String id, String jour, TimeOfDay debut, TimeOfDay fin) async {
     try {
       final response = await ApiService.put(
-        'http://127.0.0.1:8080/api/workschedules/$id',
+        '${AppConfig.baseUrl}/api/workschedules/$id',
         widget.token,
         body: json.encode({
           'dayOfWeek': jour,
@@ -180,7 +180,7 @@ class _MesHorairesScreenState extends State<MesHorairesScreen> {
   Future<void> _supprimerHoraire(String id) async {
     try {
       final response = await ApiService.delete(
-        'http://127.0.0.1:8080/api/workschedules/$id',
+        '${AppConfig.baseUrl}/api/workschedules/$id',
         widget.token,
       );
 

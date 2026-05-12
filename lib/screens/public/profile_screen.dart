@@ -10,7 +10,7 @@ import '../coiffeur/mes_photos_screen.dart';
 import '../coiffeur/mes_services_screen.dart';
 import '../coiffeur/mon_salon_screen.dart';
 import '../coiffeur/mes_horaires_screen.dart';
-
+import '../../config/app_config.dart';
 class ProfileScreen extends StatefulWidget {
   final String token;
   final String role;
@@ -57,7 +57,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           : '/api/coiffeurs/profile';
 
       final response = await ApiService.get(
-        'http://127.0.0.1:8080$endpoint',
+        '${AppConfig.baseUrl}$endpoint',
         widget.token,
       );
 
@@ -90,7 +90,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           : '/api/coiffeurs/profile';
 
       final response = await ApiService.multipart(
-        'http://127.0.0.1:8080$endpoint',
+        '${AppConfig.baseUrl}$endpoint',
         widget.token,
         fields: {'name': _nameController.text.trim()},
         filePath: imageFile?.path,

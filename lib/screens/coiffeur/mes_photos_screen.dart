@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
 import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
-
+import '../../config/app_config.dart';
 class MesPhotosScreen extends StatefulWidget {
   final String token;
 
@@ -35,7 +35,7 @@ class _MesPhotosScreenState extends State<MesPhotosScreen> {
     try {
       // Récupérer l'ID du coiffeur depuis son profil
       final profileResponse = await ApiService.get(
-        'http://127.0.0.1:8080/api/coiffeurs/profile',
+        '${AppConfig.baseUrl}/api/coiffeurs/profile',
         widget.token,
       );
 
@@ -45,7 +45,7 @@ class _MesPhotosScreenState extends State<MesPhotosScreen> {
 
         // Récupérer les photos
         final photosResponse = await ApiService.get(
-          'http://127.0.0.1:8080/api/coiffeurs/$coiffeurId/photos',
+          '${AppConfig.baseUrl}/api/coiffeurs/$coiffeurId/photos',
           widget.token,
         );
 
@@ -77,7 +77,7 @@ class _MesPhotosScreenState extends State<MesPhotosScreen> {
 
     try {
       final response = await ApiService.multipart(
-        'http://127.0.0.1:8080/api/coiffeurs/photos',
+        '${AppConfig.baseUrl}/api/coiffeurs/photos',
         widget.token,
         fields: {},
         filePath: picked.path,
@@ -106,7 +106,7 @@ class _MesPhotosScreenState extends State<MesPhotosScreen> {
   Future<void> _supprimerPhoto(String photoId) async {
     try {
       final response = await ApiService.delete(
-        'http://127.0.0.1:8080/api/coiffeurs/photos/$photoId',
+        '${AppConfig.baseUrl}/api/coiffeurs/photos/$photoId',
         widget.token,
       );
 

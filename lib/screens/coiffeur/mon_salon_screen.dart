@@ -5,7 +5,7 @@ import 'package:geolocator/geolocator.dart';
 import 'photos_salon_screen.dart';
 import 'demandes_salon_screen.dart';
 import 'mes_demandes_screen.dart';
-
+import '../../config/app_config.dart';
 class MonSalonScreen extends StatefulWidget {
   final String token;
 
@@ -42,7 +42,7 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
     });
     try {
       final profileResponse = await ApiService.get(
-        'http://127.0.0.1:8080/api/coiffeurs/profile',
+        '${AppConfig.baseUrl}/api/coiffeurs/profile',
         widget.token,
       );
 
@@ -52,7 +52,7 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
         coiffeurId = profileData['data']['userId'];
 
         final detailResponse = await ApiService.get(
-          'http://127.0.0.1:8080/api/coiffeurs/$coiffeurId/detail',
+          '${AppConfig.baseUrl}/api/coiffeurs/$coiffeurId/detail',
           widget.token,
         );
 
@@ -65,7 +65,7 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
             final salonId = salonData['id'];
 
             final salonResponse = await ApiService.get(
-              'http://127.0.0.1:8080/api/salons/$salonId/detail',
+              '${AppConfig.baseUrl}/api/salons/$salonId/detail',
               widget.token,
             );
             final salonDetailData = json.decode(salonResponse.body);
@@ -97,6 +97,7 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
         }
       }
     } catch (e) {
+      debugPrint('❌ Erreur MonSalonScreen: $e');
       setState(() {
         errorMessage = 'Impossible de se connecter au serveur';
         isLoading = false;
@@ -107,7 +108,7 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
   Future<void> _fetchDemandes(String salonId) async {
     try {
       final response = await ApiService.get(
-        'http://127.0.0.1:8080/api/salon-requests/salon/$salonId',
+        '${AppConfig.baseUrl}/api/salon-requests/salon/$salonId',
         widget.token,
       );
 
@@ -128,7 +129,7 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
       String name, String localisation, double lat, double lng) async {
     try {
       final response = await ApiService.post(
-        'http://127.0.0.1:8080/api/salons',
+        '${AppConfig.baseUrl}/api/salons',
         widget.token,
         body: json.encode({
           'name': name,
@@ -157,7 +158,7 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
   Future<void> _retirerMembre(String membreId) async {
     try {
       final response = await ApiService.put(
-        'http://127.0.0.1:8080/api/salons/${salon!['id']}/retirer',
+        '${AppConfig.baseUrl}/api/salons/${salon!['id']}/retirer',
         widget.token,
         body: json.encode({'coiffeurId': membreId}),
       );
@@ -182,7 +183,7 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
     debugPrint('🔍 nouveauAdminId envoyé: $nouveauAdminId');
     try {
       final response = await ApiService.put(
-        'http://127.0.0.1:8080/api/salons/${salon!['id']}/transferer',
+        '${AppConfig.baseUrl}/api/salons/${salon!['id']}/transferer',
         widget.token,
         body: json.encode({'nouveauAdminId': nouveauAdminId}),
       );
@@ -217,7 +218,7 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
   Future<void> _quitterSalon() async {
     try {
       final response = await ApiService.put(
-        'http://127.0.0.1:8080/api/coiffeurs/quitter-salon',
+        '${AppConfig.baseUrl}/api/coiffeurs/quitter-salon',
         widget.token,
       );
 
@@ -240,7 +241,7 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
   Future<void> _supprimerSalon() async {
     try {
       final response = await ApiService.delete(
-        'http://127.0.0.1:8080/api/salons/${salon!['id']}',
+        '${AppConfig.baseUrl}/api/salons/${salon!['id']}',
         widget.token,
       );
 
@@ -785,8 +786,23 @@ class _MonSalonScreenState extends State<MonSalonScreen> {
 
         if (isAdmin)
           _buildAdminActions()
-        else
+        else ...[
           _buildMembreActions(),
+          const SizedBox(height: 16),
+          _buildSectionButton(
+            icon: Icons.send,
+            title: 'Mes Demandes',
+            subtitle: 'Voir vos demandes envoyées aux salons',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => MesDemandesScreen(token: widget.token),
+                ),
+              );
+            },
+          ),
+        ],
 
         const SizedBox(height: 32),
       ],

@@ -3,7 +3,7 @@ import '../../services/api_service.dart';
 import 'dart:convert';
 import 'chat_screen.dart';
 import '../../services/websocket_service.dart';
-
+import '../../config/app_config.dart';
 class ConversationsScreen extends StatefulWidget {
   final String token;
   final String userId;
@@ -69,7 +69,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     for (var conversation in conversations) {
       try {
         final response = await ApiService.get(
-          'http://127.0.0.1:8080/api/messages/online/${conversation['userId']}',
+          '${AppConfig.baseUrl}/api/messages/online/${conversation['userId']}',
           widget.token,
         );
         if (response.statusCode == 200) {
@@ -91,7 +91,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     for (var partnerId in _selectedConversations) {
       try {
         await ApiService.delete(
-          'http://127.0.0.1:8080/api/messages/conversation/$partnerId',
+          '${AppConfig.baseUrl}/api/messages/conversation/$partnerId',
           widget.token,
         );
       } catch (e) {
@@ -137,7 +137,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
       });
 
       final response = await ApiService.get(
-        'http://127.0.0.1:8080/api/messages/conversations',
+        '${AppConfig.baseUrl}/api/messages/conversations',
         widget.token,
       );
 
@@ -152,6 +152,10 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
 
           setState(() {
             conversations = list;
+            conversations.sort((a, b) => DateTime.parse(
+                b['lastMessageTime'] ?? '2000-01-01')
+                .compareTo(DateTime.parse(
+                a['lastMessageTime'] ?? '2000-01-01')));
             isLoading = false;
           });
           _fetchOnlineStatuses();

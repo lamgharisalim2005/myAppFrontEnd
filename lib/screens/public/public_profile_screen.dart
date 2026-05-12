@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
 import 'dart:convert';
 import 'coiffeur_detail_screen.dart';
-
+import '../../config/app_config.dart';
 class PublicProfileScreen extends StatefulWidget {
   final String userId;
   final String userType;
@@ -47,7 +47,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
           : '/api/clients/${widget.userId}/public';
 
       final response = await ApiService.get(
-        'http://127.0.0.1:8080$endpoint',
+        '${AppConfig.baseUrl}$endpoint',
         widget.token,
       );
 

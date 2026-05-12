@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
 import '../../services/api_service.dart';
-
+import '../../config/app_config.dart';
 class PhotosSalonScreen extends StatefulWidget {
   final String token;
   final String salonId;
@@ -39,7 +39,7 @@ class _PhotosSalonScreenState extends State<PhotosSalonScreen> {
     });
     try {
       final response = await ApiService.get(
-        'http://127.0.0.1:8080/api/salons/${widget.salonId}/photos',
+        '${AppConfig.baseUrl}/api/salons/${widget.salonId}/photos',
         widget.token,
       );
 
@@ -75,7 +75,7 @@ class _PhotosSalonScreenState extends State<PhotosSalonScreen> {
 
     try {
       final response = await ApiService.multipart(
-        'http://127.0.0.1:8080/api/salons/${widget.salonId}/photos',
+        '${AppConfig.baseUrl}/api/salons/${widget.salonId}/photos',
         widget.token,
         fields: {},
         filePath: picked.path,
@@ -104,7 +104,7 @@ class _PhotosSalonScreenState extends State<PhotosSalonScreen> {
   Future<void> _supprimerPhoto(String photoId) async {
     try {
       final response = await ApiService.delete(
-        'http://127.0.0.1:8080/api/salons/${widget.salonId}/photos/$photoId',
+        '${AppConfig.baseUrl}/api/salons/${widget.salonId}/photos/$photoId',
         widget.token,
       );
 

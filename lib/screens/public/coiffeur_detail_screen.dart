@@ -4,7 +4,7 @@ import 'dart:convert';
 import '../../models/service.dart';
 import '../public/chat_screen.dart';
 import '../client/reservation_screen.dart';
-
+import '../../config/app_config.dart';
 class CoiffeurDetailScreen extends StatefulWidget {
   final String coiffeurId;
   final String coiffeurName;
@@ -63,7 +63,7 @@ class _CoiffeurDetailScreenState extends State<CoiffeurDetailScreen> {
       });
 
       final response = await ApiService.get(
-        'http://127.0.0.1:8080/api/coiffeurs/${widget.coiffeurId}/detail',
+        '${AppConfig.baseUrl}/api/coiffeurs/${widget.coiffeurId}/detail',
         widget.token ?? '',
       );
 

@@ -3,18 +3,20 @@ import '../../services/api_service.dart';
 import 'dart:convert';
 import '../../services/websocket_service.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
+import '../../config/app_config.dart';
 
 class ReservationsScreen extends StatefulWidget {
   final String token;
   final String role;
   final int initialIndex;
-
+  final String? highlightReservationId;
 
   const ReservationsScreen({
     super.key,
     required this.token,
     required this.role,
     this.initialIndex = 0,
+    this.highlightReservationId,
   });
 
   @override
@@ -30,6 +32,14 @@ class _ReservationsScreenState extends State<ReservationsScreen>
   static const Color bleu = Color(0xFF2196F3);
 
   List<dynamic> reservations = [];
+  bool isLoading = true;
+  String? errorMessage;
+  late TabController _tabController;
+
+  final ScrollController _scrollEnAttente = ScrollController();
+  final ScrollController _scrollConfirmees = ScrollController();
+  final ScrollController _scrollHistorique = ScrollController();
+  final Map<String, GlobalKey> _cardKeys = {};
 
   List<dynamic> get enAttente => reservations.where((r) {
     final status = r['status'] as String;
@@ -52,9 +62,6 @@ class _ReservationsScreenState extends State<ReservationsScreen>
     }
     return ['COMPLETED', 'CANCELLED'].contains(status);
   }).toList();
-  bool isLoading = true;
-  String? errorMessage;
-  late TabController _tabController;
 
   @override
   void initState() {
@@ -62,12 +69,10 @@ class _ReservationsScreenState extends State<ReservationsScreen>
     _tabController = TabController(
       length: 3,
       vsync: this,
-      initialIndex: widget.initialIndex, // ← ajouter
+      initialIndex: widget.initialIndex,
     );
     _fetchReservations();
 
-
-    // Recharger automatiquement quand une nouvelle réservation arrive
     WebSocketService().notificationsStream.listen((data) {
       if (mounted) {
         _fetchReservations();
@@ -78,6 +83,9 @@ class _ReservationsScreenState extends State<ReservationsScreen>
   @override
   void dispose() {
     _tabController.dispose();
+    _scrollEnAttente.dispose();
+    _scrollConfirmees.dispose();
+    _scrollHistorique.dispose();
     super.dispose();
   }
 
@@ -92,7 +100,7 @@ class _ReservationsScreenState extends State<ReservationsScreen>
           : '/api/reservations/coiffeur';
 
       final response = await ApiService.get(
-        'http://127.0.0.1:8080$endpoint',
+        '${AppConfig.baseUrl}$endpoint',
         widget.token,
       );
 
@@ -100,8 +108,16 @@ class _ReservationsScreenState extends State<ReservationsScreen>
       if (response.statusCode == 200 && data['status'] == 'success') {
         setState(() {
           reservations = data['data'] as List;
+          reservations.sort((a, b) => DateTime.parse(b['startTime'])
+              .compareTo(DateTime.parse(a['startTime'])));
           isLoading = false;
         });
+
+        if (widget.highlightReservationId != null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _scrollToHighlighted();
+          });
+        }
       } else {
         setState(() {
           errorMessage = 'Erreur serveur';
@@ -116,46 +132,110 @@ class _ReservationsScreenState extends State<ReservationsScreen>
     }
   }
 
+  void _scrollToHighlighted() {
+    if (widget.highlightReservationId == null) return;
+
+    final isEnAttente =
+    enAttente.any((r) => r['id'] == widget.highlightReservationId);
+    final isConfirmee =
+    confirmees.any((r) => r['id'] == widget.highlightReservationId);
+    final isHistoriqueR =
+    historique.any((r) => r['id'] == widget.highlightReservationId);
+
+    if (isEnAttente) {
+      _tabController.animateTo(0);
+    } else if (isConfirmee) {
+      _tabController.animateTo(1);
+    } else if (isHistoriqueR) {
+      _tabController.animateTo(2);
+    }
+
+    Future.delayed(const Duration(milliseconds: 300), () {
+      final key = _cardKeys[widget.highlightReservationId];
+      if (key?.currentContext != null) {
+        Scrollable.ensureVisible(
+          key!.currentContext!,
+          duration: const Duration(milliseconds: 500),
+          curve: Curves.easeInOut,
+        );
+      }
+    });
+  }
+
   Color _statusColor(String status) {
     switch (status) {
-      case 'CONFIRMED': return vert;
-      case 'PENDING': return orange;
-      case 'WAITING_PAYMENT': return bleu;
-      case 'COMPLETED': return Colors.grey;
-      case 'CANCELLED': return rouge;
-      case 'REJECTED': return rouge;
-      default: return Colors.grey;
+      case 'CONFIRMED':
+        return vert;
+      case 'PENDING':
+        return orange;
+      case 'WAITING_PAYMENT':
+        return bleu;
+      case 'COMPLETED':
+        return Colors.grey;
+      case 'CANCELLED':
+        return rouge;
+      case 'REJECTED':
+        return rouge;
+      default:
+        return Colors.grey;
     }
   }
 
   String _statusLabel(String status) {
     switch (status) {
-      case 'CONFIRMED': return 'Confirmée';
-      case 'PENDING': return 'En attente';
-      case 'WAITING_PAYMENT': return 'En attente de paiement';
-      case 'COMPLETED': return 'Terminée';
-      case 'CANCELLED': return 'Annulée';
-      case 'REJECTED': return 'Refusée';
-      default: return status;
+      case 'CONFIRMED':
+        return 'Confirmée';
+      case 'PENDING':
+        return 'En attente';
+      case 'WAITING_PAYMENT':
+        return 'En attente de paiement';
+      case 'COMPLETED':
+        return 'Terminée';
+      case 'CANCELLED':
+        return 'Annulée';
+      case 'REJECTED':
+        return 'Refusée';
+      default:
+        return status;
     }
   }
 
   IconData _statusIcon(String status) {
     switch (status) {
-      case 'CONFIRMED': return Icons.check_circle;
-      case 'PENDING': return Icons.hourglass_empty;
-      case 'WAITING_PAYMENT': return Icons.payment;
-      case 'COMPLETED': return Icons.done_all;
-      case 'CANCELLED': return Icons.cancel;
-      case 'REJECTED': return Icons.cancel;
-      default: return Icons.info;
+      case 'CONFIRMED':
+        return Icons.check_circle;
+      case 'PENDING':
+        return Icons.hourglass_empty;
+      case 'WAITING_PAYMENT':
+        return Icons.payment;
+      case 'COMPLETED':
+        return Icons.done_all;
+      case 'CANCELLED':
+        return Icons.cancel;
+      case 'REJECTED':
+        return Icons.cancel;
+      default:
+        return Icons.info;
     }
   }
 
   String _formatDate(String isoDate) {
     final dt = DateTime.parse(isoDate);
-    final months = ['', 'Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin',
-      'Juil', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
+    final months = [
+      '',
+      'Jan',
+      'Fév',
+      'Mar',
+      'Avr',
+      'Mai',
+      'Juin',
+      'Juil',
+      'Aoû',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Déc'
+    ];
     return '${dt.day} ${months[dt.month]} ${dt.year}';
   }
 
@@ -167,7 +247,7 @@ class _ReservationsScreenState extends State<ReservationsScreen>
   Future<void> _annulerReservation(String id) async {
     try {
       final response = await ApiService.put(
-        'http://127.0.0.1:8080/api/reservations/$id/cancel',
+        '${AppConfig.baseUrl}/api/reservations/$id/cancel',
         widget.token,
       );
 
@@ -190,7 +270,7 @@ class _ReservationsScreenState extends State<ReservationsScreen>
   Future<void> _traiterReservation(String id, String decision) async {
     try {
       final response = await ApiService.put(
-        'http://127.0.0.1:8080/api/reservations/$id?decision=$decision',
+        '${AppConfig.baseUrl}/api/reservations/$id?decision=$decision',
         widget.token,
       );
 
@@ -215,7 +295,7 @@ class _ReservationsScreenState extends State<ReservationsScreen>
   Future<void> _supprimerReservation(String id) async {
     try {
       final response = await ApiService.delete(
-        'http://127.0.0.1:8080/api/reservations/$id',
+        '${AppConfig.baseUrl}/api/reservations/$id',
         widget.token,
       );
 
@@ -235,9 +315,67 @@ class _ReservationsScreenState extends State<ReservationsScreen>
     }
   }
 
+  Future<void> _payerReservation(dynamic reservation) async {
+    try {
+      final response = await ApiService.post(
+        '${AppConfig.baseUrl}/api/payments/intent',
+        widget.token,
+        body: json.encode({
+          'reservationId': reservation['id'],
+          'currency': 'mad',
+        }),
+      );
+
+      final data = json.decode(response.body);
+      if (response.statusCode == 201 && data['status'] == 'success') {
+        final clientSecret = data['data']['clientSecret'];
+        final paymentIntentId = data['data']['paymentIntentId'];
+
+        await Stripe.instance.initPaymentSheet(
+          paymentSheetParameters: SetupPaymentSheetParameters(
+            paymentIntentClientSecret: clientSecret,
+            merchantDisplayName: 'Sana Coiffure',
+            style: ThemeMode.light,
+          ),
+        );
+
+        await Stripe.instance.presentPaymentSheet();
+
+        await ApiService.put(
+          '${AppConfig.baseUrl}/api/payments/confirmer/$paymentIntentId',
+          widget.token,
+        );
+
+        _fetchReservations();
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✅ Paiement effectué avec succès !'),
+              backgroundColor: vert,
+            ),
+          );
+        }
+      }
+    } on StripeException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+                '❌ ${e.error.localizedMessage ?? 'Paiement annulé'}'),
+            backgroundColor: rouge,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Erreur paiement: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         backgroundColor: marron,
         automaticallyImplyLeading: true,
@@ -272,9 +410,9 @@ class _ReservationsScreenState extends State<ReservationsScreen>
         child: TabBarView(
           controller: _tabController,
           children: [
-            _buildList(enAttente, isPassed: false),
-            _buildList(confirmees, isPassed: false),
-            _buildList(historique, isPassed: true),
+            _buildList(enAttente, isPassed: false, controller: _scrollEnAttente),
+            _buildList(confirmees, isPassed: false, controller: _scrollConfirmees),
+            _buildList(historique, isPassed: true, controller: _scrollHistorique),
           ],
         ),
       ),
@@ -304,7 +442,8 @@ class _ReservationsScreenState extends State<ReservationsScreen>
     );
   }
 
-  Widget _buildList(List<dynamic> items, {required bool isPassed}) {
+  Widget _buildList(List<dynamic> items,
+      {required bool isPassed, required ScrollController controller}) {
     if (items.isEmpty) {
       return Center(
         child: Column(
@@ -328,84 +467,37 @@ class _ReservationsScreenState extends State<ReservationsScreen>
     }
 
     return ListView.builder(
+      controller: controller,
       padding: const EdgeInsets.all(16),
       itemCount: items.length,
-      itemBuilder: (context, index) => _buildCard(items[index], isPassed: isPassed),
+      itemBuilder: (context, index) =>
+          _buildCard(items[index], isPassed: isPassed),
     );
-  }
-
-  Future<void> _payerReservation(dynamic reservation) async {
-    try {
-      // 1. Créer le PaymentIntent
-      final response = await ApiService.post(
-        'http://127.0.0.1:8080/api/payments/intent',
-        widget.token,
-        body: json.encode({
-          'reservationId': reservation['id'],
-          'currency': 'mad',
-        }),
-      );
-
-      final data = json.decode(response.body);
-      if (response.statusCode == 201 && data['status'] == 'success') {
-        final clientSecret = data['data']['clientSecret'];
-        final paymentIntentId = data['data']['paymentIntentId'];
-
-        // 2. Initialiser le payment sheet
-        await Stripe.instance.initPaymentSheet(
-          paymentSheetParameters: SetupPaymentSheetParameters(
-            paymentIntentClientSecret: clientSecret,
-            merchantDisplayName: 'Sana Coiffure',
-            style: ThemeMode.light,
-          ),
-        );
-
-        // 3. Afficher le payment sheet
-        await Stripe.instance.presentPaymentSheet();
-
-        // 4. Confirmer le paiement côté backend
-        await ApiService.put(
-          'http://127.0.0.1:8080/api/payments/confirmer/$paymentIntentId',
-          widget.token,
-        );
-
-        _fetchReservations();
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('✅ Paiement effectué avec succès !'),
-              backgroundColor: vert,
-            ),
-          );
-        }
-      }
-    } on StripeException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('❌ ${e.error.localizedMessage ?? 'Paiement annulé'}'),
-            backgroundColor: rouge,
-          ),
-        );
-      }
-    } catch (e) {
-      debugPrint('Erreur paiement: $e');
-    }
   }
 
   Widget _buildCard(dynamic reservation, {required bool isPassed}) {
     final status = reservation['status'] as String;
     final isClient = widget.role == 'CLIENT';
+    final isHighlighted =
+        widget.highlightReservationId == reservation['id'];
+
+    final key = GlobalKey();
+    _cardKeys[reservation['id']] = key;
 
     return Container(
+      key: key,
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isHighlighted ? marron.withOpacity(0.08) : Colors.white,
         borderRadius: BorderRadius.circular(16),
+        border: isHighlighted
+            ? Border.all(color: marron, width: 2)
+            : null,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: isHighlighted
+                ? marron.withOpacity(0.2)
+                : Colors.black.withOpacity(0.05),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -415,7 +507,8 @@ class _ReservationsScreenState extends State<ReservationsScreen>
         children: [
           // Header status
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            padding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
               color: _statusColor(status).withOpacity(0.1),
               borderRadius: const BorderRadius.only(
@@ -425,7 +518,8 @@ class _ReservationsScreenState extends State<ReservationsScreen>
             ),
             child: Row(
               children: [
-                Icon(_statusIcon(status), color: _statusColor(status), size: 18),
+                Icon(_statusIcon(status),
+                    color: _statusColor(status), size: 18),
                 const SizedBox(width: 8),
                 Text(
                   _statusLabel(status),
@@ -435,6 +529,25 @@ class _ReservationsScreenState extends State<ReservationsScreen>
                     fontSize: 14,
                   ),
                 ),
+                if (isHighlighted) ...[
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: marron,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Text(
+                      '⭐ Votre réservation',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -445,7 +558,6 @@ class _ReservationsScreenState extends State<ReservationsScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Nom client ou coiffeur
                 Row(
                   children: [
                     const Icon(Icons.person, color: marron, size: 18),
@@ -464,17 +576,18 @@ class _ReservationsScreenState extends State<ReservationsScreen>
                 ),
                 const SizedBox(height: 8),
 
-                // Date et heure
                 Row(
                   children: [
-                    const Icon(Icons.calendar_today, color: Colors.grey, size: 16),
+                    const Icon(Icons.calendar_today,
+                        color: Colors.grey, size: 16),
                     const SizedBox(width: 8),
                     Text(
                       _formatDate(reservation['startTime']),
                       style: const TextStyle(color: Colors.grey),
                     ),
                     const SizedBox(width: 16),
-                    const Icon(Icons.access_time, color: Colors.grey, size: 16),
+                    const Icon(Icons.access_time,
+                        color: Colors.grey, size: 16),
                     const SizedBox(width: 8),
                     Text(
                       '${_formatTime(reservation['startTime'])} - ${_formatTime(reservation['endTime'])}',
@@ -484,11 +597,11 @@ class _ReservationsScreenState extends State<ReservationsScreen>
                 ),
                 const SizedBox(height: 8),
 
-                // Services
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.content_cut, color: Colors.grey, size: 16),
+                    const Icon(Icons.content_cut,
+                        color: Colors.grey, size: 16),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -500,13 +613,13 @@ class _ReservationsScreenState extends State<ReservationsScreen>
                 ),
                 const SizedBox(height: 8),
 
-                // Prix
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.payments, color: marron, size: 16),
+                        const Icon(Icons.payments,
+                            color: marron, size: 16),
                         const SizedBox(width: 8),
                         Text(
                           '${reservation['totalPrice'].toStringAsFixed(0)} MAD',
@@ -521,7 +634,6 @@ class _ReservationsScreenState extends State<ReservationsScreen>
                   ],
                 ),
 
-                // Boutons actions
                 if (!isPassed) ...[
                   const SizedBox(height: 12),
                   const Divider(),
@@ -536,9 +648,11 @@ class _ReservationsScreenState extends State<ReservationsScreen>
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
-                      onPressed: () => _confirmerSuppression(reservation['id']),
+                      onPressed: () =>
+                          _confirmerSuppression(reservation['id']),
                       icon: const Icon(Icons.delete_outline, color: rouge),
-                      label: const Text('Supprimer', style: TextStyle(color: rouge)),
+                      label: const Text('Supprimer',
+                          style: TextStyle(color: rouge)),
                       style: OutlinedButton.styleFrom(
                         side: const BorderSide(color: rouge),
                         shape: RoundedRectangleBorder(
@@ -581,7 +695,8 @@ class _ReservationsScreenState extends State<ReservationsScreen>
         children: [
           Expanded(
             child: ElevatedButton.icon(
-              onPressed: () => _traiterReservation(reservation['id'], 'CONFIRMED'),
+              onPressed: () =>
+                  _traiterReservation(reservation['id'], 'CONFIRMED'),
               icon: const Icon(Icons.check),
               label: const Text('Confirmer'),
               style: ElevatedButton.styleFrom(
@@ -596,9 +711,11 @@ class _ReservationsScreenState extends State<ReservationsScreen>
           const SizedBox(width: 8),
           Expanded(
             child: OutlinedButton.icon(
-              onPressed: () => _traiterReservation(reservation['id'], 'REJECTED'),
+              onPressed: () =>
+                  _traiterReservation(reservation['id'], 'REJECTED'),
               icon: const Icon(Icons.close, color: rouge),
-              label: const Text('Refuser', style: TextStyle(color: rouge)),
+              label: const Text('Refuser',
+                  style: TextStyle(color: rouge)),
               style: OutlinedButton.styleFrom(
                 side: const BorderSide(color: rouge),
                 shape: RoundedRectangleBorder(
@@ -610,6 +727,7 @@ class _ReservationsScreenState extends State<ReservationsScreen>
         ],
       );
     }
+
     if (isClient && status == 'WAITING_PAYMENT') {
       return SizedBox(
         width: double.infinity,
@@ -637,7 +755,8 @@ class _ReservationsScreenState extends State<ReservationsScreen>
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Annuler la réservation'),
-        content: const Text('Êtes-vous sûr de vouloir annuler cette réservation ?'),
+        content: const Text(
+            'Êtes-vous sûr de vouloir annuler cette réservation ?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -648,7 +767,8 @@ class _ReservationsScreenState extends State<ReservationsScreen>
               Navigator.pop(context);
               _annulerReservation(id);
             },
-            style: ElevatedButton.styleFrom(backgroundColor: rouge, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: rouge, foregroundColor: Colors.white),
             child: const Text('Oui, annuler'),
           ),
         ],
@@ -661,7 +781,8 @@ class _ReservationsScreenState extends State<ReservationsScreen>
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Supprimer la réservation'),
-        content: const Text('Êtes-vous sûr de vouloir supprimer cette réservation ?'),
+        content: const Text(
+            'Êtes-vous sûr de vouloir supprimer cette réservation ?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -672,7 +793,8 @@ class _ReservationsScreenState extends State<ReservationsScreen>
               Navigator.pop(context);
               _supprimerReservation(id);
             },
-            style: ElevatedButton.styleFrom(backgroundColor: rouge, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: rouge, foregroundColor: Colors.white),
             child: const Text('Oui, supprimer'),
           ),
         ],

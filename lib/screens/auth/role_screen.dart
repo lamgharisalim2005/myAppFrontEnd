@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../public/home_screen.dart';
-
+import '../../config/app_config.dart';
 class RoleScreen extends StatefulWidget {
   final String idToken;
   const RoleScreen({super.key, required this.idToken});
@@ -21,7 +21,7 @@ class _RoleScreenState extends State<RoleScreen> {
 
     try {
       final response = await http.post(
-        Uri.parse('http://127.0.0.1:8080/api/auth/google'),
+        Uri.parse('${AppConfig.baseUrl}/api/auth/google'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'idToken': widget.idToken,
