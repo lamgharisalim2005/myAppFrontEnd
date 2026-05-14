@@ -394,42 +394,45 @@ class _ChatScreenState extends State<ChatScreen> {
                     : null,
               ),
               const SizedBox(width: 10),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    widget.otherUserName,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
+              Expanded(                           // ← ajouté
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.otherUserName,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                      overflow: TextOverflow.ellipsis, // ← ajouté
                     ),
-                  ),
-                  Row(
-                    children: [
-                      Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          color: _isOtherOnline
-                              ? Colors.greenAccent
-                              : Colors.grey,
-                          shape: BoxShape.circle,
+                    Row(
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: _isOtherOnline
+                                ? Colors.greenAccent
+                                : Colors.grey,
+                            shape: BoxShape.circle,
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        _isOtherOnline ? 'En ligne' : 'Hors ligne',
-                        style: TextStyle(
-                          color: _isOtherOnline
-                              ? Colors.greenAccent
-                              : Colors.white70,
-                          fontSize: 12,
+                        const SizedBox(width: 4),
+                        Text(
+                          _isOtherOnline ? 'En ligne' : 'Hors ligne',
+                          style: TextStyle(
+                            color: _isOtherOnline
+                                ? Colors.greenAccent
+                                : Colors.white70,
+                            fontSize: 12,
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                ],
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ],
           ),

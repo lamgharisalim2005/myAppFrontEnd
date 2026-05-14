@@ -3,6 +3,7 @@ import '../../services/api_service.dart';
 import 'dart:convert';
 import 'coiffeur_detail_screen.dart';
 import '../../config/app_config.dart';
+
 class PublicProfileScreen extends StatefulWidget {
   final String userId;
   final String userType;
@@ -84,6 +85,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
             color: Colors.white,
             fontWeight: FontWeight.bold,
           ),
+          overflow: TextOverflow.ellipsis,
         ),
         elevation: 0,
       ),
@@ -152,12 +154,16 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
               fontWeight: FontWeight.bold,
               color: Colors.black87,
             ),
+            textAlign: TextAlign.center,
+            overflow: TextOverflow.ellipsis,
+            maxLines: 2,
           ),
           const SizedBox(height: 8),
 
           // Badge rôle
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            padding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             decoration: BoxDecoration(
               color: marron.withOpacity(0.1),
               borderRadius: BorderRadius.circular(20),
@@ -192,9 +198,12 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                   children: [
                     const Icon(Icons.email, color: marron),
                     const SizedBox(width: 12),
-                    Text(
-                      profile?['email'] ?? '',
-                      style: const TextStyle(fontSize: 16),
+                    Expanded(
+                      child: Text(
+                        profile?['email'] ?? '',
+                        style: const TextStyle(fontSize: 16),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ],
                 ),
@@ -205,9 +214,12 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                   children: [
                     const Icon(Icons.person, color: marron),
                     const SizedBox(width: 12),
-                    Text(
-                      isCoiffeur ? 'Coiffeur professionnel' : 'Client',
-                      style: const TextStyle(fontSize: 16),
+                    Expanded(
+                      child: Text(
+                        isCoiffeur ? 'Coiffeur professionnel' : 'Client',
+                        style: const TextStyle(fontSize: 16),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ],
                 ),

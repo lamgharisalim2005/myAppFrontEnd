@@ -667,25 +667,28 @@ class _MesHorairesScreenState extends State<MesHorairesScreen> {
               child: Icon(icon, color: marron, size: 20),
             ),
             const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  value,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: marron,
+            Expanded(                          // ← ajouté
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    value,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: marron,
+                    ),
                   ),
-                ),
-                Text(
-                  label,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: Colors.grey,
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Colors.grey,
+                    ),
+                    overflow: TextOverflow.ellipsis, // ← ajouté
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ],
         ),

@@ -330,15 +330,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
               children: [
                 const Icon(Icons.email, color: Colors.grey),
                 const SizedBox(width: 12),
-                Text(
-                  profile?['email'] ?? '',
-                  style: const TextStyle(color: Colors.grey),
+                Expanded(  // ← ajouter
+                  child: Text(
+                    profile?['email'] ?? '',
+                    style: const TextStyle(color: Colors.grey),
+                    overflow: TextOverflow.ellipsis,  // ← tronquer si trop long
+                  ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 16),
-
           // Bouton sauvegarder
           SizedBox(
             width: double.infinity,
