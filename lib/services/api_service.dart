@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../screens/auth/login_screen.dart';
+import '../screens/public/home_screen.dart';
 import 'websocket_service.dart';
 
 class ApiService {
@@ -19,7 +20,9 @@ class ApiService {
     if (response.statusCode == 401 || response.statusCode == 403) {
       await _deconnexion();
     }
-
+    if (response.statusCode == 404) {
+      await _allerVersHome();
+    }
     return response;
   }
 
@@ -36,7 +39,9 @@ class ApiService {
     if (response.statusCode == 401 || response.statusCode == 403) {
       await _deconnexion();
     }
-
+    if (response.statusCode == 404) {
+      await _allerVersHome();
+    }
     return response;
   }
 
@@ -46,10 +51,10 @@ class ApiService {
         required Map<String, String> fields,
         String? filePath,
         String fileField = 'file',
-        String method = 'PUT', // ← ajouter
+        String method = 'PUT',
       }) async {
     final request = http.MultipartRequest(
-      method, // ← remplacer 'PUT' par method
+      method,
       Uri.parse(url),
     );
     request.headers['Authorization'] = 'Bearer $token';
@@ -59,13 +64,16 @@ class ApiService {
       request.files.add(await http.MultipartFile.fromPath(fileField, filePath));
     }
 
-    final streamedResponse = await request.send().timeout(const Duration(seconds: 30));
+    final streamedResponse = await request.send()
+        .timeout(const Duration(seconds: 120));
     final responseBody = await streamedResponse.stream.bytesToString();
 
     if (streamedResponse.statusCode == 401 || streamedResponse.statusCode == 403) {
       await _deconnexion();
     }
-
+    if (streamedResponse.statusCode == 404) {
+      await _allerVersHome();
+    }
     return http.Response(responseBody, streamedResponse.statusCode);
   }
 
@@ -82,7 +90,9 @@ class ApiService {
     if (response.statusCode == 401 || response.statusCode == 403) {
       await _deconnexion();
     }
-
+    if (response.statusCode == 404) {
+      await _allerVersHome();
+    }
     return response;
   }
 
@@ -98,21 +108,45 @@ class ApiService {
     if (response.statusCode == 401 || response.statusCode == 403) {
       await _deconnexion();
     }
-
+    if (response.statusCode == 404) {
+      await _allerVersHome();
+    }
     return response;
   }
 
   static Future<void> _deconnexion() async {
-    // Déconnecter WebSocket
     WebSocketService().disconnect();
-
-    // Vider SharedPreferences
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
-
-    // Rediriger vers login
     navigatorKey.currentState?.pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const LoginScreen()),
+          (route) => false,
+    );
+  }
+
+  static Future<void> _allerVersHome() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('jwt_token') ?? '';
+    final role = prefs.getString('role') ?? '';
+    final userId = prefs.getString('userId') ?? '';
+
+    debugPrint('🏠 allerVersHome: token=$token, role=$role, userId=$userId');
+
+    if (token.isEmpty) {
+      debugPrint('🏠 token vide → déconnexion');
+      await _deconnexion();
+      return;
+    }
+
+    debugPrint('🏠 token ok → HomeScreen');
+    navigatorKey.currentState?.pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (_) => HomeScreen(
+          token: token,
+          role: role,
+          userId: userId,
+        ),
+      ),
           (route) => false,
     );
   }
